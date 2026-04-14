@@ -21,3 +21,6 @@ streamlit>=1.28.0
 
 # Utils
 tqdm>=4.66.0
+
+# Testing
+pytest>=7.4.0
