@@ -64,10 +64,14 @@ def init_session_state():
         st.session_state.loaded_images = []
     if 'detected_panels' not in st.session_state:
         st.session_state.detected_panels = []
+    if 'panel_order' not in st.session_state:
+        st.session_state.panel_order = []  # Custom order indices
     if 'temp_dir' not in st.session_state:
         st.session_state.temp_dir = tempfile.mkdtemp()
     if 'rendering' not in st.session_state:
         st.session_state.rendering = False
+    if 'show_reorder_ui' not in st.session_state:
+        st.session_state.show_reorder_ui = False
 
 
 def load_comic_file(uploaded_file, temp_dir: str) -> List[np.ndarray]:
@@ -105,7 +109,40 @@ def detect_panels(images: List[np.ndarray], reading_order: str) -> List:
         progress_bar.progress((i + 1) / len(images))
     
     progress_bar.empty()
+    
+    # Initialize custom order to default order
+    st.session_state.panel_order = list(range(len(all_panels)))
+    
     return all_panels
+
+
+def reorder_panels(detected_panels: List, order_indices: List[int]) -> List:
+    """Reorder panels based on custom indices."""
+    return [detected_panels[i] for i in order_indices]
+
+
+def move_panel(order: List[int], index: int, direction: int) -> List[int]:
+    """Move panel at index in direction (-1 for up, +1 for down)."""
+    new_order = order.copy()
+    new_pos = index + direction
+    
+    if 0 <= new_pos < len(new_order):
+        # Swap
+        new_order[index], new_order[new_pos] = new_order[new_pos], new_order[index]
+    
+    return new_order
+
+
+def remove_panel(order: List[int], index: int) -> List[int]:
+    """Remove panel at index from order."""
+    new_order = order.copy()
+    del new_order[index]
+    return new_order
+
+
+def reset_order(num_panels: int) -> List[int]:
+    """Reset order to default."""
+    return list(range(num_panels))
 
 
 def render_video(panels: List, config: RenderConfig, progress_placeholder):
@@ -236,19 +273,88 @@ def main():
     if st.session_state.detected_panels:
         st.header(f"🎨 Detected Panels ({len(st.session_state.detected_panels)})")
         
-        # Show panel thumbnails
-        cols = st.columns(4)
-        for i, panel in enumerate(st.session_state.detected_panels[:12]):
-            with cols[i % 4]:
+        # Toggle reorder UI
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("🔀 Reorder Panels", type="secondary"):
+                st.session_state.show_reorder_ui = not st.session_state.show_reorder_ui
+        
+        # Reorder UI
+        if st.session_state.show_reorder_ui:
+            st.info("Use ↑ ↓ to reorder, 🗑️ to remove panel, 🔄 to reset")
+            
+            # Show all panels with reorder controls
+            num_panels = len(st.session_state.detected_panels)
+            current_order = st.session_state.panel_order
+            
+            for display_idx, original_idx in enumerate(current_order):
+                panel = st.session_state.detected_panels[original_idx]
+                
+                col_img, col_controls = st.columns([1, 4])
+                
+                with col_img:
+                    try:
+                        panel_img = panel.extract_from_original()
+                        panel_img = cv2.resize(panel_img, (120, 90))
+                        st.image(panel_img, caption=f"#{display_idx+1}")
+                    except:
+                        st.error("Error")
+                
+                with col_controls:
+                    btn_cols = st.columns([1, 1, 1, 1, 8])
+                    
+                    with btn_cols[0]:
+                        if st.button("↑", key=f"up_{display_idx}", disabled=display_idx == 0):
+                            st.session_state.panel_order = move_panel(
+                                current_order, display_idx, -1
+                            )
+                            st.rerun()
+                    
+                    with btn_cols[1]:
+                        if st.button("↓", key=f"down_{display_idx}", disabled=display_idx == len(current_order) - 1):
+                            st.session_state.panel_order = move_panel(
+                                current_order, display_idx, 1
+                            )
+                            st.rerun()
+                    
+                    with btn_cols[2]:
+                        if st.button("🗑️", key=f"del_{display_idx}"):
+                            st.session_state.panel_order = remove_panel(
+                                current_order, display_idx
+                            )
+                            st.rerun()
+                    
+                    with btn_cols[3]:
+                        if st.button("🔄", key=f"reset_{display_idx}"):
+                            st.session_state.panel_order = reset_order(num_panels)
+                            st.rerun()
+                    
+                    with btn_cols[4]:
+                        st.caption(f"Original: #{original_idx+1} | Page: {panel.page_index+1}")
+            
+            st.divider()
+        
+        # Get panels in current order
+        ordered_panels = reorder_panels(
+            st.session_state.detected_panels,
+            st.session_state.panel_order
+        )
+        
+        # Show current order preview (first 8)
+        st.subheader(f"Current Sequence ({len(ordered_panels)} panels)")
+        
+        preview_cols = st.columns(min(8, len(ordered_panels)))
+        for i, panel in enumerate(ordered_panels[:8]):
+            with preview_cols[i % len(preview_cols)]:
                 try:
                     panel_img = panel.extract_from_original()
-                    panel_img = cv2.resize(panel_img, (200, 150))
-                    st.image(panel_img, caption=f"Panel {i+1}")
-                except Exception as e:
-                    st.error(f"Error displaying panel {i+1}")
+                    panel_img = cv2.resize(panel_img, (100, 75))
+                    st.image(panel_img, caption=f"#{i+1}")
+                except:
+                    st.error("Err")
         
-        if len(st.session_state.detected_panels) > 12:
-            st.info(f"... and {len(st.session_state.detected_panels) - 12} more panels")
+        if len(ordered_panels) > 8:
+            st.caption(f"... and {len(ordered_panels) - 8} more")
         
         # Render section
         st.header("🎬 Generate Video")
@@ -289,7 +395,7 @@ def main():
             
             with st.spinner("Rendering video..."):
                 result_path = render_video(
-                    st.session_state.detected_panels,
+                    ordered_panels,  # Use ordered panels
                     config,
                     progress_placeholder
                 )
