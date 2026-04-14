@@ -26,6 +26,7 @@ class Panel:
     height: int
     page_index: int = 0
     panel_index: int = 0
+    original_image: Optional[np.ndarray] = None
     
     @property
     def bbox(self) -> Tuple[int, int, int, int]:
@@ -42,9 +43,18 @@ class Panel:
         """Return panel area."""
         return self.width * self.height
     
-    def extract(self, image: np.ndarray) -> np.ndarray:
-        """Extract panel from image."""
-        return image[self.y:self.y + self.height, self.x:self.x + self.width]
+    def extract(self, image: Optional[np.ndarray] = None) -> np.ndarray:
+        """Extract panel from image. Uses stored image if not provided."""
+        img = image or self.original_image
+        if img is None:
+            raise ValueError("No image available for extraction")
+        return img[self.y:self.y + self.height, self.x:self.x + self.width]
+    
+    def extract_from_original(self) -> np.ndarray:
+        """Extract panel from stored original image."""
+        if self.original_image is None:
+            raise ValueError("No original image stored in panel")
+        return self.extract(self.original_image)
 
 
 class PanelDetector:
@@ -103,10 +113,11 @@ class PanelDetector:
         if len(panels) < 2:
             panels = self._detect_by_lines(gray, page_area, width, height)
         
-        # Add page index
+        # Add page index and reference to original image
         for i, panel in enumerate(panels):
             panel.page_index = page_index
             panel.panel_index = i
+            panel.original_image = image.copy()
         
         # Sort by reading order
         panels = self._sort_by_reading_order(panels, width, height)
