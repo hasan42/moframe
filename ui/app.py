@@ -66,6 +66,8 @@ def init_session_state():
         st.session_state.detected_panels = []
     if 'panel_order' not in st.session_state:
         st.session_state.panel_order = []  # Custom order indices
+    if 'preview_frames' not in st.session_state:
+        st.session_state.preview_frames = []
     if 'temp_dir' not in st.session_state:
         st.session_state.temp_dir = tempfile.mkdtemp()
     if 'rendering' not in st.session_state:
@@ -161,6 +163,24 @@ def render_video(panels: List, config: RenderConfig, progress_placeholder):
     except Exception as e:
         progress_placeholder.error(f"Rendering failed: {e}")
         return None
+
+
+def generate_preview(panels: List, config: RenderConfig) -> List:
+    """Generate preview frames for first transition."""
+    if len(panels) < 2:
+        return []
+    
+    renderer = Renderer(config)
+    
+    try:
+        # Generate preview for transition between first two panels
+        preview_frames = renderer.preview_transition(
+            panels[0], panels[1], num_samples=5
+        )
+        return preview_frames
+    except Exception as e:
+        st.error(f"Preview generation failed: {e}")
+        return []
 
 
 def main():
@@ -355,6 +375,58 @@ def main():
         
         if len(ordered_panels) > 8:
             st.caption(f"... and {len(ordered_panels) - 8} more")
+        
+        # Preview Section
+        st.header("👁️ Preview Transition")
+        
+        col_preview1, col_preview2, col_preview3 = st.columns([1, 2, 1])
+        
+        with col_preview2:
+            if st.button("🔍 Generate Preview", type="secondary"):
+                with st.spinner("Generating preview..."):
+                    # Create preview config (low res for speed)
+                    preview_res_map = {
+                        "1920x1080 (Full HD)": (640, 360),
+                        "1280x720 (HD)": (427, 240),
+                        "854x480 (SD)": (320, 180),
+                        "640x360": (320, 180)
+                    }
+                    
+                    strategy_map = {
+                        "Ken Burns": MorphStrategy.KEN_BURNS,
+                        "Crossfade": MorphStrategy.CROSSFADE,
+                        "Slide": MorphStrategy.SLIDE,
+                        "Zoom": MorphStrategy.ZOOM,
+                        "Feature Morph": MorphStrategy.FEATURE_MORPH
+                    }
+                    
+                    preview_config = RenderConfig(
+                        fps=fps,
+                        resolution=preview_res_map.get(resolution, (427, 240)),
+                        panel_duration_frames=int(panel_duration * fps),
+                        transition_duration_frames=int(transition_duration * fps),
+                        transition_strategy=strategy_map.get(transition_type, MorphStrategy.KEN_BURNS)
+                    )
+                    
+                    preview_frames = generate_preview(ordered_panels, preview_config)
+                    
+                    if preview_frames:
+                        st.session_state.preview_frames = preview_frames
+                        st.success(f"Preview ready! {len(preview_frames)} frames")
+                    else:
+                        st.error("Could not generate preview")
+        
+        # Display preview if available
+        if 'preview_frames' in st.session_state and st.session_state.preview_frames:
+            st.subheader("Preview Frames")
+            preview_cols = st.columns(len(st.session_state.preview_frames))
+            
+            for i, (col, frame) in enumerate(zip(preview_cols, st.session_state.preview_frames)):
+                with col:
+                    st.image(frame, caption=f"Frame {i+1}")
+            
+            # Create animation from frames
+            st.caption("💡 Tip: If preview looks good, proceed to render full video")
         
         # Render section
         st.header("🎬 Generate Video")
