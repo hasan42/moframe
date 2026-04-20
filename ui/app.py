@@ -13,6 +13,7 @@ import streamlit as st
 import numpy as np
 from PIL import Image
 import cv2
+import plotly.graph_objects as go
 
 # Add parent directory to path for imports
 import sys
@@ -309,7 +310,7 @@ def main():
                     st.session_state.panel_order = list(range(len(st.session_state.detected_panels)))
         
         else:  # Manual Draw mode
-            st.info("Manual mode: Define and edit panel regions")
+            st.info("Manual mode: Click 'Add Panel', then drag to move, resize by dragging corners")
             
             # Page selector
             page_options = [f"Page {i+1}" for i in range(len(st.session_state.loaded_images))]
@@ -320,124 +321,136 @@ def main():
             img = st.session_state.loaded_images[page_idx]
             img_h, img_w = img.shape[:2]
             
-            st.markdown(f"**Page size: {img_w} x {img_h}**")
+            # Create Plotly figure with image background
+            fig = go.Figure()
             
-            # Initialize editing state
-            if 'editing_panel_idx' not in st.session_state:
-                st.session_state.editing_panel_idx = None
-            if 'edit_values' not in st.session_state:
-                st.session_state.edit_values = {'x': 0, 'y': 0, 'w': 200, 'h': 300}
+            # Add image as background
+            fig.add_layout_image(
+                dict(
+                    source=Image.fromarray(img),
+                    xref="x",
+                    yref="y",
+                    x=0,
+                    y=img_h,
+                    sizex=img_w,
+                    sizey=img_h,
+                    sizing="stretch",
+                    opacity=1,
+                    layer="below"
+                )
+            )
             
-            # Show preview with all panels
-            viz_img = img.copy()
-            colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), 
-                      (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 165, 0)]
+            # Add existing panels as editable shapes
+            colors = ['red', 'green', 'blue', 'yellow', 'magenta', 'cyan', 'purple', 'orange']
             
+            shapes = []
+            annotations = []
             page_panels = [(i, p) for i, p in enumerate(st.session_state.manual_panels) if p.page_index == page_idx]
             
             for list_idx, (panel_idx, panel) in enumerate(page_panels):
                 color = colors[panel_idx % len(colors)]
-                cv2.rectangle(viz_img, (panel.x, panel.y),
-                             (panel.x + panel.width, panel.y + panel.height),
-                             color, 3)
-                cv2.putText(viz_img, str(panel_idx + 1), (panel.x + 5, panel.y + 25),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                # Rectangle shape (editable)
+                shapes.append(dict(
+                    type="rect",
+                    x0=panel.x, y0=img_h - panel.y - panel.height,
+                    x1=panel.x + panel.width, y1=img_h - panel.y,
+                    line=dict(color=color, width=3),
+                    fillcolor="rgba(0,0,0,0)",
+                    editable=True,
+                    name=f"panel_{panel_idx}"
+                ))
+                # Label annotation
+                annotations.append(dict(
+                    x=panel.x + panel.width/2,
+                    y=img_h - panel.y - panel.height/2,
+                    text=str(panel_idx + 1),
+                    showarrow=False,
+                    font=dict(size=20, color=color)
+                ))
             
-            st.image(viz_img, caption="Preview with panels (numbered)")
+            fig.update_layout(
+                xaxis=dict(range=[0, img_w], scaleanchor="y", scaleratio=1, showgrid=False, zeroline=False),
+                yaxis=dict(range=[0, img_h], showgrid=False, zeroline=False),
+                width=800,
+                height=int(800 * img_h / img_w),
+                shapes=shapes,
+                annotations=annotations,
+                margin=dict(l=0, r=0, t=30, b=0),
+                dragmode="drawrect" if st.session_state.get('adding_new_panel', False) else None,
+            )
             
-            # Panel list with edit/delete buttons
-            if page_panels:
-                st.markdown("**Existing panels:**")
-                for list_idx, (panel_idx, panel) in enumerate(page_panels):
-                    cols = st.columns([1, 3, 1, 1])
-                    with cols[0]:
-                        st.markdown(f"**#{panel_idx + 1}**")
-                    with cols[1]:
-                        st.markdown(f"({panel.x}, {panel.y}) {panel.width}x{panel.height}")
-                    with cols[2]:
-                        if st.button("✏️ Edit", key=f"edit_{panel_idx}"):
-                            st.session_state.editing_panel_idx = panel_idx
-                            st.session_state.edit_values = {
-                                'x': panel.x, 'y': panel.y,
-                                'w': panel.width, 'h': panel.height
-                            }
-                            st.rerun()
-                    with cols[3]:
-                        if st.button("🗑️ Del", key=f"del_{panel_idx}"):
-                            st.session_state.manual_panels.pop(panel_idx)
-                            # Reindex remaining panels
-                            for i, p in enumerate(st.session_state.manual_panels):
-                                p.panel_index = i
-                            st.success(f"Panel {panel_idx + 1} deleted")
-                            st.rerun()
+            # Display the interactive plot
+            st.markdown("**Drag rectangles to move, drag corners to resize:**")
             
-            # Edit or Create section
-            is_editing = st.session_state.editing_panel_idx is not None
+            # Store shapes in session for callback
+            if 'plotly_shapes' not in st.session_state:
+                st.session_state.plotly_shapes = {}
             
-            if is_editing:
-                st.markdown(f"**Editing Panel #{st.session_state.editing_panel_idx + 1}**")
-                st.markdown("*Adjust sliders to modify position and size:*")
-            else:
-                st.markdown("**Add New Panel**")
-                st.markdown("*Adjust sliders to define region:*")
+            # Event handling for shape changes
+            selected = st.plotly_chart(
+                fig, 
+                use_container_width=True,
+                key=f"plotly_canvas_{page_idx}",
+                on_select="rerun"
+            )
             
-            # Sliders for interactive adjustment
-            values = st.session_state.edit_values
+            # Process shape changes
+            if selected and hasattr(selected, 'selection') and selected.selection:
+                selection = selected.selection
+                # Update panels based on new shapes
+                for shape_data in selection.get('shapes', []):
+                    shape_name = shape_data.get('name', '')
+                    if shape_name.startswith('panel_'):
+                        panel_idx = int(shape_name.split('_')[1])
+                        x0, x1 = shape_data.get('x0', 0), shape_data.get('x1', 0)
+                        y0, y1 = shape_data.get('y0', 0), shape_data.get('y1', 0)
+                        
+                        # Update panel
+                        if panel_idx < len(st.session_state.manual_panels):
+                            panel = st.session_state.manual_panels[panel_idx]
+                            panel.x = int(min(x0, x1))
+                            panel.y = int(img_h - max(y0, y1))
+                            panel.width = int(abs(x1 - x0))
+                            panel.height = int(abs(y1 - y0))
             
-            col1, col2 = st.columns(2)
-            with col1:
-                new_x = st.slider("X (left)", 0, img_w, values['x'])
-                new_y = st.slider("Y (top)", 0, img_h, values['y'])
-            with col2:
-                max_w = min(values['x'] + values['w'] + 500, img_w - new_x)
-                max_h = min(values['y'] + values['h'] + 500, img_h - new_y)
-                new_w = st.slider("Width", 10, max_w, values['w'])
-                new_h = st.slider("Height", 10, max_h, values['h'])
-            
-            # Live preview of current adjustment
-            preview_img = img.copy()
-            cv2.rectangle(preview_img, (new_x, new_y),
-                         (new_x + new_w, new_y + new_h), (0, 255, 0), 3)
-            st.image(preview_img, caption="Current selection (green)")
-            
-            # Action buttons
-            btn_cols = st.columns(4)
+            # Control buttons
+            st.markdown("**Controls:**")
+            btn_cols = st.columns([1, 1, 1, 1])
             
             with btn_cols[0]:
-                if is_editing:
-                    if st.button("💾 Save Changes", type="primary"):
-                        idx = st.session_state.editing_panel_idx
-                        panel = st.session_state.manual_panels[idx]
-                        panel.x = new_x
-                        panel.y = new_y
-                        panel.width = new_w
-                        panel.height = new_h
-                        st.session_state.editing_panel_idx = None
-                        st.success(f"Panel {idx + 1} updated!")
-                        st.rerun()
-                else:
-                    if st.button("➕ Add Panel", type="primary"):
-                        from core.panel_detector import Panel
-                        panel = Panel(new_x, new_y, new_w, new_h)
-                        panel.original_image = img.copy()
-                        panel.page_index = page_idx
-                        panel.panel_index = len(st.session_state.manual_panels)
-                        st.session_state.manual_panels.append(panel)
-                        # Reset edit values for next panel
-                        st.session_state.edit_values = {'x': 0, 'y': 0, 'w': 200, 'h': 300}
-                        st.success(f"Panel {len(st.session_state.manual_panels)} added!")
-                        st.rerun()
-            
-            with btn_cols[1]:
-                if is_editing and st.button("❌ Cancel"):
-                    st.session_state.editing_panel_idx = None
+                if st.button("➕ Add Panel", type="primary"):
+                    # Add default new panel in center
+                    from core.panel_detector import Panel
+                    new_w, new_h = img_w // 3, img_h // 3
+                    new_x = (img_w - new_w) // 2
+                    new_y = (img_h - new_h) // 2
+                    panel = Panel(new_x, new_y, new_w, new_h)
+                    panel.original_image = img.copy()
+                    panel.page_index = page_idx
+                    panel.panel_index = len(st.session_state.manual_panels)
+                    st.session_state.manual_panels.append(panel)
+                    st.success(f"Panel added! Drag it to position.")
                     st.rerun()
             
+            with btn_cols[1]:
+                if st.button("🗑️ Delete Last") and st.session_state.manual_panels:
+                    # Find last panel on this page
+                    page_panel_indices = [i for i, p in enumerate(st.session_state.manual_panels) if p.page_index == page_idx]
+                    if page_panel_indices:
+                        last_idx = page_panel_indices[-1]
+                        st.session_state.manual_panels.pop(last_idx)
+                        # Reindex
+                        for i, p in enumerate(st.session_state.manual_panels):
+                            p.panel_index = i
+                        st.rerun()
+            
             with btn_cols[2]:
-                if st.button("🗑️ Clear All"):
-                    st.session_state.manual_panels = []
-                    st.session_state.editing_panel_idx = None
-                    st.success("All panels cleared")
+                if st.button("🗑️ Clear Page"):
+                    # Remove all panels from this page
+                    st.session_state.manual_panels = [p for p in st.session_state.manual_panels if p.page_index != page_idx]
+                    # Reindex
+                    for i, p in enumerate(st.session_state.manual_panels):
+                        p.panel_index = i
                     st.rerun()
             
             with btn_cols[3]:
@@ -446,12 +459,11 @@ def main():
                     st.session_state.panel_order = list(range(len(st.session_state.manual_panels)))
                     st.success(f"Using {len(st.session_state.detected_panels)} manual panels")
             
-            # Show all panels summary
-            if st.session_state.manual_panels:
-                st.markdown("**All manual panels:**")
-                for i, panel in enumerate(st.session_state.manual_panels):
-                    page_str = f"Page {panel.page_index + 1}" if panel.page_index is not None else "Unknown"
-                    st.markdown(f"{i+1}. ({panel.x}, {panel.y}) {panel.width}x{panel.height} — {page_str}")
+            # Show panel list
+            if page_panels:
+                st.markdown("**Panels on this page:**")
+                for list_idx, (panel_idx, panel) in enumerate(page_panels):
+                    st.markdown(f"{panel_idx + 1}. ({panel.x}, {panel.y}) {panel.width}x{panel.height}")
     
     # Display detected panels
     if st.session_state.detected_panels:
