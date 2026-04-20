@@ -305,91 +305,78 @@ def main():
                     st.session_state.panel_order = list(range(len(st.session_state.detected_panels)))
         
         else:  # Manual Draw mode
-            st.info("Manual mode: draw rectangles on the page to define panels")
+            st.info("Manual mode: Define panel regions by coordinates")
             
             # Page selector for manual mode
             page_options = [f"Page {i+1}" for i in range(len(st.session_state.loaded_images))]
-            selected_page = st.selectbox("Select page to edit", page_options)
+            selected_page = st.selectbox("Select page to edit", page_options, key="manual_page")
             page_idx = page_options.index(selected_page)
             
-            # Show canvas for drawing
             st.session_state.current_page = page_idx
             img = st.session_state.loaded_images[page_idx]
             
-            # Display image with instruction
-            st.markdown("**Click and drag on the image to draw panel regions**")
+            # Display image with size info
+            st.markdown(f"**Page size: {img.shape[1]} x {img.shape[0]}**")
             
-            # Canvas for drawing (using streamlit-drawable-canvas if available, else simple inputs)
-            try:
-                from streamlit_drawable_canvas import st_canvas
-                
-                # Initialize canvas
-                canvas_result = st_canvas(
-                    fill_color="rgba(255, 0, 0, 0.3)",
-                    stroke_width=2,
-                    stroke_color="#FF0000",
-                    background_image=Image.fromarray(img),
-                    height=img.shape[0],
-                    width=img.shape[1],
-                    drawing_mode="rect",
-                    key=f"canvas_{page_idx}",
-                )
-                
-                # Process drawn rectangles
-                if canvas_result.json_data is not None:
+            # Show current manual panels on image
+            if st.session_state.manual_panels:
+                viz_img = img.copy()
+                colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
+                for i, panel in enumerate(st.session_state.manual_panels):
+                    if panel.page_index == page_idx:
+                        color = colors[i % len(colors)]
+                        cv2.rectangle(viz_img, (panel.x, panel.y), 
+                                     (panel.x + panel.width, panel.y + panel.height), 
+                                     color, 3)
+                        cv2.putText(viz_img, str(i+1), (panel.x + 5, panel.y + 25),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                st.image(viz_img, caption="Current panels (numbered)")
+            else:
+                st.image(img, caption="Select page to add panels")
+            
+            # Input form for new panel
+            st.markdown("**Add new panel:**")
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                new_x = st.number_input("X", min_value=0, max_value=img.shape[1], value=50)
+            with col2:
+                new_y = st.number_input("Y", min_value=0, max_value=img.shape[0], value=50)
+            with col3:
+                new_w = st.number_input("Width", min_value=10, max_value=img.shape[1], value=300)
+            with col4:
+                new_h = st.number_input("Height", min_value=10, max_value=img.shape[0], value=400)
+            
+            col_add, col_clear, col_use = st.columns(3)
+            
+            with col_add:
+                if st.button("➕ Add Panel", type="secondary"):
                     from core.panel_detector import Panel
-                    
-                    objects = canvas_result.json_data.get("objects", [])
-                    manual_panels = []
-                    
-                    for obj in objects:
-                        if obj.get("type") == "rect":
-                            left = int(obj.get("left", 0))
-                            top = int(obj.get("top", 0))
-                            width = int(obj.get("width", 0))
-                            height = int(obj.get("height", 0))
-                            
-                            if width > 20 and height > 20:
-                                panel = Panel(left, top, width, height)
-                                panel.original_image = img.copy()
-                                panel.page_index = page_idx
-                                manual_panels.append(panel)
-                    
-                    if st.button("✅ Use Manual Panels", type="primary"):
-                        st.session_state.detected_panels = manual_panels
-                        st.session_state.panel_order = list(range(len(manual_panels)))
-                        st.success(f"Created {len(manual_panels)} manual panels")
-                        
-            except ImportError:
-                # Fallback: simple coordinate inputs
-                st.warning("Install streamlit-drawable-canvas for easier drawing:")
-                st.code("pip install streamlit-drawable-canvas")
-                
-                st.markdown("**Enter panel coordinates manually:**")
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    x = st.number_input("X", min_value=0, max_value=img.shape[1], value=0)
-                with col2:
-                    y = st.number_input("Y", min_value=0, max_value=img.shape[0], value=0)
-                with col3:
-                    w = st.number_input("Width", min_value=10, max_value=img.shape[1], value=200)
-                with col4:
-                    h = st.number_input("Height", min_value=10, max_value=img.shape[0], value=200)
-                
-                if st.button("➕ Add Panel"):
-                    from core.panel_detector import Panel
-                    panel = Panel(x, y, w, h)
+                    panel = Panel(new_x, new_y, new_w, new_h)
                     panel.original_image = img.copy()
                     panel.page_index = page_idx
                     st.session_state.manual_panels.append(panel)
-                    st.success(f"Panel added! Total: {len(st.session_state.manual_panels)}")
-                
+                    st.success(f"Panel {len(st.session_state.manual_panels)} added!")
+                    st.rerun()
+            
+            with col_clear:
+                if st.button("🗑️ Clear All", type="secondary"):
+                    st.session_state.manual_panels = []
+                    st.success("Cleared all panels")
+                    st.rerun()
+            
+            with col_use:
                 if st.button("✅ Use Manual Panels", type="primary") and st.session_state.manual_panels:
                     st.session_state.detected_panels = st.session_state.manual_panels.copy()
                     st.session_state.panel_order = list(range(len(st.session_state.manual_panels)))
-                    st.session_state.manual_panels = []  # Clear for next time
                     st.success(f"Using {len(st.session_state.detected_panels)} manual panels")
+            
+            # Show list of current manual panels
+            if st.session_state.manual_panels:
+                st.markdown("**Current panels:**")
+                for i, panel in enumerate(st.session_state.manual_panels):
+                    page_str = f"Page {panel.page_index + 1}" if panel.page_index is not None else "Unknown"
+                    st.markdown(f"{i+1}. ({panel.x}, {panel.y}) {panel.width}x{panel.height} — {page_str}")
     
     # Display detected panels
     if st.session_state.detected_panels:
