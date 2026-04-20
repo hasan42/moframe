@@ -28,6 +28,7 @@ temp/
 *.mp4
 *.avi
 *.mkv
+test-files/
 
 # Streamlit
 .streamlit/

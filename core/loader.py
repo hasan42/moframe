@@ -133,7 +133,15 @@ def _load_from_cbz(path: Path) -> List[np.ndarray]:
 
 
 def _load_from_cbr(path: Path) -> List[np.ndarray]:
-    """Load images from CBR (RAR) archive."""
+    """Load images from CBR (RAR) archive using temp extraction."""
+    import shutil
+    import subprocess
+    
+    # Try bsdtar first (available on macOS), then python rarfile
+    if shutil.which('bsdtar'):
+        return _load_from_cbr_bsdtar(path)
+    
+    # Fallback to rarfile
     try:
         import rarfile
     except ImportError:
@@ -163,6 +171,52 @@ def _load_from_cbr(path: Path) -> List[np.ndarray]:
                     images.append(np.array(img))
             except Exception as e:
                 print(f"Warning: Failed to load {img_name}: {e}")
+                continue
+    
+    if not images:
+        raise ValueError(f"No images found in CBR: {path}")
+    
+    return images
+
+
+def _load_from_cbr_bsdtar(path: Path) -> List[np.ndarray]:
+    """Load images from CBR using bsdtar (macOS built-in)."""
+    import subprocess
+    import shutil
+    
+    images = []
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        
+        # Extract to temp directory
+        result = subprocess.run(
+            ['bsdtar', '-xf', str(path), '-C', str(temp_path)],
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to extract CBR: {result.stderr}")
+        
+        # Find and load images
+        image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.tiff', '.tif', '.bmp', '.gif'}
+        image_files = [
+            f for f in temp_path.rglob('*')
+            if f.is_file() and f.suffix.lower() in image_extensions
+            and not f.name.startswith('.')
+            and not '__' in f.name
+        ]
+        image_files.sort(key=lambda x: x.name)
+        
+        for img_path in image_files:
+            try:
+                img = Image.open(img_path)
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                images.append(np.array(img))
+            except Exception as e:
+                print(f"Warning: Failed to load {img_path.name}: {e}")
                 continue
     
     if not images:

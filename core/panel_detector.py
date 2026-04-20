@@ -27,29 +27,29 @@ class Panel:
     page_index: int = 0
     panel_index: int = 0
     original_image: Optional[np.ndarray] = None
-    
+
     @property
     def bbox(self) -> Tuple[int, int, int, int]:
         """Return bounding box as (x, y, width, height)."""
         return (self.x, self.y, self.width, self.height)
-    
+
     @property
     def center(self) -> Tuple[float, float]:
         """Return center point."""
         return (self.x + self.width / 2, self.y + self.height / 2)
-    
+
     @property
     def area(self) -> int:
         """Return panel area."""
         return self.width * self.height
-    
+
     def extract(self, image: Optional[np.ndarray] = None) -> np.ndarray:
         """Extract panel from image. Uses stored image if not provided."""
-        img = image or self.original_image
+        img = image if image is not None else self.original_image
         if img is None:
             raise ValueError("No image available for extraction")
         return img[self.y:self.y + self.height, self.x:self.x + self.width]
-    
+
     def extract_from_original(self) -> np.ndarray:
         """Extract panel from stored original image."""
         if self.original_image is None:
@@ -60,10 +60,9 @@ class Panel:
 class PanelDetector:
     """
     Detects comic panels from page images.
-    
-    Uses contour detection to find rectangular regions that are likely panels.
+    Uses content projection to find panel boundaries.
     """
-    
+
     def __init__(
         self,
         min_panel_area_ratio: float = 0.02,
@@ -73,7 +72,7 @@ class PanelDetector:
     ):
         """
         Initialize detector.
-        
+
         Args:
             min_panel_area_ratio: Minimum panel area as ratio of page area
             max_panel_area_ratio: Maximum panel area as ratio of page area
@@ -84,15 +83,15 @@ class PanelDetector:
         self.max_panel_area_ratio = max_panel_area_ratio
         self.gap_threshold = gap_threshold
         self.reading_order = reading_order
-    
+
     def detect(self, image: np.ndarray, page_index: int = 0) -> List[Panel]:
         """
         Detect panels in a comic page.
-        
+
         Args:
             image: RGB image as numpy array (H, W, 3)
             page_index: Index of the page for tracking
-            
+
         Returns:
             List of Panel objects in reading order
         """
@@ -101,143 +100,238 @@ class PanelDetector:
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
             gray = image
-        
+
         # Get image dimensions
         height, width = gray.shape
         page_area = height * width
-        
-        # Strategy 1: Find panels by detecting enclosed regions
-        panels = self._detect_by_contours(gray, page_area, width, height)
-        
-        # Strategy 2: If few panels found, try line-based detection
-        if len(panels) < 2:
-            panels = self._detect_by_lines(gray, page_area, width, height)
-        
+
+        # Strategy: Find panels by splitting on content gaps
+        panels = self._detect_by_projection(gray, page_area, width, height)
+
+        # Fallback if no panels found
+        if len(panels) < 1:
+            panels = self._detect_by_fallback(gray, page_area, width, height)
+
         # Add page index and reference to original image
         for i, panel in enumerate(panels):
             panel.page_index = page_index
             panel.panel_index = i
             panel.original_image = image.copy()
-        
+
         # Sort by reading order
         panels = self._sort_by_reading_order(panels, width, height)
-        
+
         return panels
-    
-    def _detect_by_contours(
-        self, 
-        gray: np.ndarray, 
+
+    def _detect_by_projection(
+        self,
+        gray: np.ndarray,
         page_area: int,
-        width: int, 
+        width: int,
         height: int
     ) -> List[Panel]:
-        """Detect panels using contour detection."""
-        # Invert image (panels are usually lighter than gutters)
-        inverted = cv2.bitwise_not(gray)
+        """Detect panels by finding dark separator lines."""
+        # Find very dark pixels (panel borders)
+        _, dark = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
         
-        # Apply adaptive threshold
-        binary = cv2.adaptiveThreshold(
-            inverted, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            15, 10
-        )
+        # Dilate horizontally to connect horizontal border segments
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (width // 8, 1))
+        h_lines = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, h_kernel)
         
-        # Dilate to connect nearby panel edges
+        # Dilate vertically to connect vertical border segments  
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, height // 8))
+        v_lines = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, v_kernel)
+        
+        # Combine
+        borders = cv2.add(h_lines, v_lines)
+        
+        # Dilate to connect corners
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        dilated = cv2.dilate(binary, kernel, iterations=2)
+        borders = cv2.dilate(borders, kernel, iterations=2)
         
-        # Find contours
-        contours, _ = cv2.findContours(
-            dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        # Invert: borders become black, panels become white
+        panel_mask = cv2.bitwise_not(borders)
+        
+        # Find connected components (panels)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            panel_mask, connectivity=8
         )
         
         panels = []
+        margin = min(width, height) // 40
         
-        for contour in contours:
-            # Get bounding rectangle
-            x, y, w, h = cv2.boundingRect(contour)
+        for i in range(1, num_labels):
+            x, y, w, h, area = stats[i]
             
-            # Filter by area
-            area = w * h
-            area_ratio = area / page_area
-            
-            if not (self.min_panel_area_ratio <= area_ratio <= self.max_panel_area_ratio):
+            # Skip if covers almost full page
+            if x < margin and y < margin and (x+w) > (width-margin) and (y+h) > (height-margin):
                 continue
             
-            # Filter by aspect ratio (panels shouldn't be too thin)
-            aspect_ratio = max(w, h) / max(min(w, h), 1)
-            if aspect_ratio > 10:  # Too thin, probably a line
+            area_ratio = (w * h) / page_area
+            if area_ratio < 0.02:
+                continue
+            if area_ratio > 0.85:
                 continue
             
-            # Filter by solidity (panels should be solid rectangles)
-            hull = cv2.convexHull(contour)
-            hull_area = cv2.contourArea(hull)
-            if hull_area > 0:
-                solidity = area / hull_area
-                if solidity < 0.5:  # Too irregular
-                    continue
+            if w < width // 6 or h < height // 10:
+                continue
+                
+            aspect = max(w, h) / max(min(w, h), 1)
+            if aspect > 10:
+                continue
             
             panels.append(Panel(x, y, w, h))
         
+        # If not enough panels, try content-based approach
+        if len(panels) < 2:
+            panels = self._detect_by_content_gaps(gray, page_area, width, height)
+        
         return panels
     
-    def _detect_by_lines(
-        self, 
-        gray: np.ndarray, 
+    def _detect_by_content_gaps(
+        self,
+        gray: np.ndarray,
         page_area: int,
-        width: int, 
+        width: int,
         height: int
     ) -> List[Panel]:
-        """Detect panels by finding line gaps (alternative method)."""
-        # Apply edge detection
-        edges = cv2.Canny(gray, 50, 150)
-        
-        # Find horizontal and vertical lines
-        horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (width // 4, 1))
-        vertical_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, height // 4))
-        
-        horizontal_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, horizontal_kernel)
-        vertical_lines = cv2.morphologyEx(edges, cv2.MORPH_OPEN, vertical_kernel)
-        
-        # Combine lines
-        lines = cv2.addWeighted(horizontal_lines, 0.5, vertical_lines, 0.5, 0)
-        
-        # Find contours from lines
-        contours, _ = cv2.findContours(
-            lines, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-        
+        """Fallback: detect panels by content gaps."""
+        # Binary: content = not pure white
+        _, binary = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
+
+        # Remove small noise
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+
+        # Dilate to connect content within panels
+        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
+        binary = cv2.dilate(binary, dilate_kernel, iterations=2)
+
+        # Find content bounding box
+        rows = np.any(binary, axis=1)
+        cols = np.any(binary, axis=0)
+
+        if not np.any(rows) or not np.any(cols):
+            return []
+
+        y_min = max(0, np.where(rows)[0][0] - 5)
+        y_max = min(height, np.where(rows)[0][-1] + 5)
+        x_min = max(0, np.where(cols)[0][0] - 5)
+        x_max = min(width, np.where(cols)[0][-1] + 5)
+
+        content = binary[y_min:y_max, x_min:x_max]
+        content_h, content_w = content.shape
+
+        # Analyze horizontal gaps
+        h_proj = np.sum(content, axis=1)
+        h_threshold = np.mean(h_proj) * 0.05  # Lower threshold
+        if h_threshold < 10:
+            h_threshold = 10
+
+        # Find horizontal splits (gaps)
+        h_splits = [0]
+        in_gap = False
+        gap_start = 0
+        min_gap = 8
+
+        for i, val in enumerate(h_proj):
+            if val < h_threshold and not in_gap:
+                in_gap = True
+                gap_start = i
+            elif val >= h_threshold and in_gap:
+                in_gap = False
+                if i - gap_start >= min_gap:
+                    h_splits.append((gap_start + i) // 2)
+
+        if in_gap and content_h - gap_start >= min_gap:
+            h_splits.append(content_h)
+        else:
+            h_splits.append(content_h)
+
+        # Analyze vertical gaps
+        v_proj = np.sum(content, axis=0)
+        v_threshold = np.mean(v_proj) * 0.05  # Lower threshold
+        if v_threshold < 10:
+            v_threshold = 10
+
+        v_splits = [0]
+        in_gap = False
+        gap_start = 0
+
+        for i, val in enumerate(v_proj):
+            if val < v_threshold and not in_gap:
+                in_gap = True
+                gap_start = i
+            elif val >= v_threshold and in_gap:
+                in_gap = False
+                if i - gap_start >= min_gap:
+                    v_splits.append((gap_start + i) // 2)
+
+        if in_gap and content_w - gap_start >= min_gap:
+            v_splits.append(content_w)
+        else:
+            v_splits.append(content_w)
+
+        # Remove duplicates and sort
+        h_splits = sorted(set(h_splits))
+        v_splits = sorted(set(v_splits))
+
+        # Build panels
         panels = []
-        
-        for contour in contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            area = w * h
-            area_ratio = area / page_area
-            
-            if self.min_panel_area_ratio <= area_ratio <= self.max_panel_area_ratio:
-                aspect_ratio = max(w, h) / max(min(w, h), 1)
-                if aspect_ratio <= 10:
-                    panels.append(Panel(x, y, w, h))
-        
+        margin = 3
+
+        for i in range(len(h_splits) - 1):
+            for j in range(len(v_splits) - 1):
+                x1 = x_min + v_splits[j] + margin
+                x2 = x_min + v_splits[j + 1] - margin
+                y1 = y_min + h_splits[i] + margin
+                y2 = y_min + h_splits[i + 1] - margin
+
+                w = max(0, x2 - x1)
+                h = max(0, y2 - y1)
+
+                if w < width // 8 or h < height // 12:
+                    continue
+
+                area_ratio = (w * h) / page_area
+                if area_ratio < 0.015 or area_ratio > 0.95:
+                    continue
+
+                aspect = max(w, h) / max(min(w, h), 1)
+                if aspect > 10:
+                    continue
+
+                panels.append(Panel(x1, y1, w, h))
+
         return panels
-    
+
+    def _detect_by_fallback(
+        self,
+        gray: np.ndarray,
+        page_area: int,
+        width: int,
+        height: int
+    ) -> List[Panel]:
+        """Fallback: return whole page as one panel."""
+        margin = min(width, height) // 40
+        return [Panel(margin, margin, width - 2*margin, height - 2*margin)]
+
     def _sort_by_reading_order(
-        self, 
-        panels: List[Panel], 
-        width: int, 
+        self,
+        panels: List[Panel],
+        width: int,
         height: int
     ) -> List[Panel]:
         """Sort panels by expected reading order."""
         if not panels:
             return panels
-        
+
         # Group panels by rows (vertical position)
-        row_threshold = height * 0.1  # 10% of page height
-        
+        row_threshold = height * 0.15  # 15% of page height
+
         rows = []
         current_row = [panels[0]]
-        
+
         for panel in panels[1:]:
             if abs(panel.y - current_row[0].y) < row_threshold:
                 current_row.append(panel)
@@ -245,10 +339,10 @@ class PanelDetector:
                 rows.append(current_row)
                 current_row = [panel]
         rows.append(current_row)
-        
+
         # Sort rows by vertical position (top to bottom)
         rows.sort(key=lambda row: sum(p.y for p in row) / len(row))
-        
+
         # Sort panels within each row by horizontal position
         sorted_panels = []
         for row in rows:
@@ -257,32 +351,32 @@ class PanelDetector:
             else:
                 row.sort(key=lambda p: p.x)  # Left to right
             sorted_panels.extend(row)
-        
+
         # Update panel indices
         for i, panel in enumerate(sorted_panels):
             panel.panel_index = i
-        
+
         return sorted_panels
-    
+
     def visualize(
-        self, 
-        image: np.ndarray, 
+        self,
+        image: np.ndarray,
         panels: List[Panel],
         show_numbers: bool = True
     ) -> np.ndarray:
         """
         Draw detected panels on image.
-        
+
         Args:
             image: Original RGB image
             panels: Detected panels
             show_numbers: Whether to show panel numbers
-            
+
         Returns:
             Visualization image
         """
         viz = image.copy()
-        
+
         colors = [
             (255, 0, 0),    # Red
             (0, 255, 0),    # Green
@@ -291,10 +385,10 @@ class PanelDetector:
             (255, 0, 255),  # Magenta
             (0, 255, 255),  # Yellow
         ]
-        
+
         for i, panel in enumerate(panels):
             color = colors[i % len(colors)]
-            
+
             # Draw rectangle
             cv2.rectangle(
                 viz,
@@ -303,7 +397,7 @@ class PanelDetector:
                 color,
                 3
             )
-            
+
             # Draw number
             if show_numbers:
                 cv2.putText(
@@ -315,7 +409,7 @@ class PanelDetector:
                     color,
                     2
                 )
-        
+
         return viz
 
 
@@ -326,12 +420,12 @@ def detect_panels(
 ) -> List[Panel]:
     """
     Convenience function to detect panels.
-    
+
     Args:
         image: RGB image
         reading_order: "ltr", "rtl", or "ttb"
         **kwargs: Additional detector parameters
-        
+
     Returns:
         List of detected panels
     """
@@ -340,7 +434,7 @@ def detect_panels(
         order = ReadingOrder.RIGHT_TO_LEFT
     elif reading_order == "ttb":
         order = ReadingOrder.TOP_TO_BOTTOM
-    
+
     detector = PanelDetector(reading_order=order, **kwargs)
     return detector.detect(image)
 
@@ -349,31 +443,31 @@ if __name__ == "__main__":
     # CLI test
     import sys
     from loader import load_comic
-    
+
     if len(sys.argv) < 2:
         print("Usage: python panel_detector.py <path_to_comic_page>")
         sys.exit(1)
-    
+
     path = sys.argv[1]
-    
+
     print(f"\nLoading image...")
     images = load_comic(path)
-    
+
     if not images:
         print("No images loaded")
         sys.exit(1)
-    
+
     image = images[0]
     print(f"Image shape: {image.shape}")
-    
+
     print(f"\nDetecting panels...")
     detector = PanelDetector()
     panels = detector.detect(image)
-    
+
     print(f"Found {len(panels)} panels:")
     for i, panel in enumerate(panels):
         print(f"  Panel {i+1}: pos=({panel.x}, {panel.y}), size={panel.width}x{panel.height}")
-    
+
     # Save visualization
     if panels:
         viz = detector.visualize(image, panels)

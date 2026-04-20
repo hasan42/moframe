@@ -245,6 +245,9 @@ class Renderer:
         pan_y: int
     ) -> np.ndarray:
         """Apply zoom and pan to image."""
+        # Clamp zoom to prevent oversized output
+        zoom = max(1.0, zoom)
+        
         if zoom == 1.0 and pan_x == 0 and pan_y == 0:
             return img.copy()
         
@@ -253,6 +256,10 @@ class Renderer:
         # Calculate scaled size
         new_w = int(w / zoom)
         new_h = int(h / zoom)
+        
+        # Ensure we don't exceed original size
+        new_w = min(new_w, w)
+        new_h = min(new_h, h)
         
         # Resize
         scaled = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
