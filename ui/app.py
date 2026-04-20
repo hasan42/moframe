@@ -8,12 +8,15 @@ import tempfile
 import shutil
 from pathlib import Path
 from typing import List, Optional
+import json
+import base64
+import io
 
 import streamlit as st
+import streamlit.components.v1 as components
 import numpy as np
 from PIL import Image
 import cv2
-import plotly.graph_objects as go
 
 # Add parent directory to path for imports
 import sys
@@ -85,9 +88,197 @@ def init_session_state():
         st.session_state.editing_panel_idx = None
     if 'edit_values' not in st.session_state:
         st.session_state.edit_values = {'x': 0, 'y': 0, 'w': 200, 'h': 300}
+    if 'canvas_panels' not in st.session_state:
+        st.session_state.canvas_panels = []
 
 
-def load_comic_file(uploaded_file, temp_dir: str) -> List[np.ndarray]:
+def render_canvas_editor(image: np.ndarray, panels: list, key: str):
+    """Render interactive HTML5 canvas with drag-drop and resize."""
+    img_h, img_w = image.shape[:2]
+    
+    # Convert image to base64
+    pil_img = Image.fromarray(image)
+    buf = io.BytesIO()
+    pil_img.save(buf, format='PNG')
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+    
+    # Panels JSON
+    panels_data = [{'x': p.x, 'y': p.y, 'w': p.width, 'h': p.height, 'label': str(i+1)} 
+                   for i, p in enumerate(panels)]
+    panels_json = json.dumps(panels_data)
+    
+    # HTML/JS
+    html = f"""
+    <div id="editor-{key}" style="position: relative; display: inline-block;">
+        <canvas id="canvas-{key}" width="{img_w}" height="{img_h}" 
+                style="border: 2px solid #333; cursor: crosshair; max-width: 100%; height: auto;"></canvas>
+    </div>
+    <div style="margin-top: 8px; font-size: 13px; color: #666;">
+        💡 Drag inside to move | Drag corners to resize | Double-click to delete
+    </div>
+    
+    <script>
+    (function() {{
+        const canvas = document.getElementById('canvas-{key}');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.src = 'data:image/png;base64,{img_b64}';
+        
+        let panels = {panels_json};
+        let selected = null;
+        let dragging = false;
+        let resizing = false;
+        let resizeCorner = '';
+        let startX, startY, startPanel;
+        
+        const HANDLE = 10;
+        const MIN = 30;
+        const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff', '#800080', '#ffa500'];
+        
+        function draw() {{
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0);
+            
+            panels.forEach((p, i) => {{
+                const c = colors[i % colors.length];
+                ctx.strokeStyle = c;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(p.x, p.y, p.w, p.h);
+                
+                // Label
+                ctx.fillStyle = c;
+                ctx.font = 'bold 16px Arial';
+                ctx.fillText(p.label, p.x + 5, p.y + 20);
+                
+                // Handles if selected
+                if (p === selected) {{
+                    ctx.fillStyle = '#fff';
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 1;
+                    
+                    // Corner handles
+                    const corners = [
+                        [p.x, p.y], [p.x + p.w, p.y],
+                        [p.x, p.y + p.h], [p.x + p.w, p.y + p.h]
+                    ];
+                    corners.forEach(([cx, cy]) => {{
+                        ctx.fillRect(cx - HANDLE/2, cy - HANDLE/2, HANDLE, HANDLE);
+                        ctx.strokeRect(cx - HANDLE/2, cy - HANDLE/2, HANDLE, HANDLE);
+                    }});
+                }}
+            }});
+        }}
+        
+        function getCursor(x, y, p) {{
+            const corners = [
+                [p.x, p.y, 'nw'], [p.x + p.w, p.y, 'ne'],
+                [p.x, p.y + p.h, 'sw'], [p.x + p.w, p.y + p.h, 'se']
+            ];
+            for (let [cx, cy, type] of corners) {{
+                if (Math.abs(x - cx) < HANDLE && Math.abs(y - cy) < HANDLE) return type;
+            }}
+            if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return 'move';
+            return null;
+        }}
+        
+        canvas.addEventListener('mousedown', e => {{
+            const r = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / r.width;
+            const scaleY = canvas.height / r.height;
+            const x = (e.clientX - r.left) * scaleX;
+            const y = (e.clientY - r.top) * scaleY;
+            
+            selected = null;
+            for (let i = panels.length - 1; i >= 0; i--) {{
+                const hit = getCursor(x, y, panels[i]);
+                if (hit) {{
+                    selected = panels[i];
+                    startX = x; startY = y;
+                    startPanel = {{...p: selected}};
+                    if (hit === 'move') dragging = true;
+                    else {{ resizing = true; resizeCorner = hit; }}
+                    draw();
+                    return;
+                }}
+            }}
+            draw();
+        }});
+        
+        canvas.addEventListener('mousemove', e => {{
+            if (!selected || (!dragging && !resizing)) return;
+            
+            const r = canvas.getBoundingClientRect();
+            const x = (e.clientX - r.left) * (canvas.width / r.width);
+            const y = (e.clientY - r.top) * (canvas.height / r.height);
+            
+            const dx = x - startX;
+            const dy = y - startY;
+            
+            if (dragging) {{
+                selected.x = Math.max(0, Math.min(canvas.width - selected.w, startPanel.p.x + dx));
+                selected.y = Math.max(0, Math.min(canvas.height - selected.h, startPanel.p.y + dy));
+            }} else {{
+                if (resizeCorner.includes('e')) selected.w = Math.max(MIN, startPanel.p.w + dx);
+                if (resizeCorner.includes('w')) {{
+                    const nw = Math.max(MIN, startPanel.p.w - dx);
+                    selected.x = startPanel.p.x + (startPanel.p.w - nw);
+                    selected.w = nw;
+                }}
+                if (resizeCorner.includes('s')) selected.h = Math.max(MIN, startPanel.p.h + dy);
+                if (resizeCorner.includes('n')) {{
+                    const nh = Math.max(MIN, startPanel.p.h - dy);
+                    selected.y = startPanel.p.y + (startPanel.p.h - nh);
+                    selected.h = nh;
+                }}
+            }}
+            draw();
+        }});
+        
+        canvas.addEventListener('mouseup', () => {{
+            dragging = false;
+            resizing = false;
+            resizeCorner = '';
+        }});
+        
+        canvas.addEventListener('dblclick', e => {{
+            const r = canvas.getBoundingClientRect();
+            const x = (e.clientX - r.left) * (canvas.width / r.width);
+            const y = (e.clientY - r.top) * (canvas.height / r.height);
+            
+            for (let i = panels.length - 1; i >= 0; i--) {{
+                const p = panels[i];
+                if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) {{
+                    panels.splice(i, 1);
+                    selected = null;
+                    draw();
+                    return;
+                }}
+            }}
+        }});
+        
+        // Expose for Streamlit
+        window.getPanels_{key} = () => JSON.stringify(panels);
+        window.addPanel_{key} = () => {{
+            const w = Math.floor(canvas.width / 3);
+            const h = Math.floor(canvas.height / 3);
+            panels.push({{
+                x: Math.floor((canvas.width - w) / 2),
+                y: Math.floor((canvas.height - h) / 2),
+                w: w, h: h,
+                label: String(panels.length + 1)
+            }});
+            draw();
+        }};
+        
+        img.onload = draw;
+    }})();
+    </script>
+    """
+    
+    components.html(html, height=img_h + 50, scrolling=False)
+
+
+
     """Load comic from uploaded file."""
     if uploaded_file is None:
         return []
@@ -309,8 +500,8 @@ def main():
                     st.success(f"Found {len(st.session_state.detected_panels)} panels")
                     st.session_state.panel_order = list(range(len(st.session_state.detected_panels)))
         
-        else:  # Manual Draw mode
-            st.info("Manual mode: Click on image to create panel, then adjust with sliders")
+        else:  # Manual Draw mode with HTML5 Canvas
+            st.info("Manual mode: Drag panels to move, drag corners to resize, double-click to delete")
             
             # Page selector
             page_options = [f"Page {i+1}" for i in range(len(st.session_state.loaded_images))]
@@ -319,143 +510,54 @@ def main():
             
             st.session_state.current_page = page_idx
             img = st.session_state.loaded_images[page_idx]
-            img_h, img_w = img.shape[:2]
             
-            # Initialize click position
-            if 'click_x' not in st.session_state:
-                st.session_state.click_x = img_w // 2
-                st.session_state.click_y = img_h // 2
+            # Filter panels for current page
+            page_panels = [p for p in st.session_state.manual_panels if p.page_index == page_idx]
             
-            # Two-column layout: image left, controls right
-            col_img, col_ctrl = st.columns([3, 2])
-            
-            with col_img:
-                st.markdown("**Click to set panel position:**")
-                # Display image with click handler
-                import streamlit.components.v1 as components
-                
-                # Simple click detection using st.image with experimental feature
-                clicked = st.image(img, use_column_width=True)
-                
-                # Alternative: use st.slider for position after visual selection
-                st.markdown("*Or set position manually:*")
-            
-            with col_ctrl:
-                st.markdown("**Panel settings:**")
-                
-                # Position inputs
-                new_x = st.number_input("X (left)", 0, img_w, st.session_state.click_x)
-                new_y = st.number_input("Y (top)", 0, img_h, st.session_state.click_y)
-                new_w = st.number_input("Width", 10, img_w, 300)
-                new_h = st.number_input("Height", 10, img_h, 400)
-                
-                # Preview checkbox
-                show_preview = st.checkbox("Show preview", value=True)
-                
-                # Add button
-                if st.button("➕ Add Panel", type="primary"):
+            # Control buttons
+            btn_cols = st.columns([1, 1, 1, 1])
+            with btn_cols[0]:
+                if st.button("➕ Add Panel", type="primary", key="add_panel_btn"):
                     from core.panel_detector import Panel
-                    panel = Panel(new_x, new_y, new_w, new_h)
+                    img_h, img_w = img.shape[:2]
+                    new_w, new_h = img_w // 3, img_h // 3
+                    panel = Panel(
+                        (img_w - new_w) // 2,
+                        (img_h - new_h) // 2,
+                        new_w, new_h
+                    )
                     panel.original_image = img.copy()
                     panel.page_index = page_idx
-                    panel.panel_index = len(st.session_state.manual_panels)
                     st.session_state.manual_panels.append(panel)
-                    st.session_state.click_x = new_x
-                    st.session_state.click_y = new_y
-                    st.success(f"Panel {len(st.session_state.manual_panels)} added!")
                     st.rerun()
             
-            # Preview section below
-            if show_preview or st.session_state.manual_panels:
-                st.markdown("**Preview:**")
-                viz_img = img.copy()
-                colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), 
-                          (255, 0, 255), (0, 255, 255), (128, 0, 128), (255, 165, 0)]
-                
-                # Draw existing panels
-                page_panels = [(i, p) for i, p in enumerate(st.session_state.manual_panels) if p.page_index == page_idx]
-                for list_idx, (panel_idx, panel) in enumerate(page_panels):
-                    color = colors[panel_idx % len(colors)]
-                    cv2.rectangle(viz_img, (panel.x, panel.y),
-                                 (panel.x + panel.width, panel.y + panel.height),
-                                 color, 3)
-                    cv2.putText(viz_img, str(panel_idx + 1), (panel.x + 5, panel.y + 25),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-                
-                # Draw preview of new panel
-                if show_preview:
-                    cv2.rectangle(viz_img, (new_x, new_y),
-                                 (new_x + new_w, new_y + new_h), (0, 255, 0), 2)
-                    cv2.putText(viz_img, "NEW", (new_x + 5, new_y + 20),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                
-                st.image(viz_img, use_column_width=True)
+            with btn_cols[1]:
+                if st.button("🗑️ Clear This Page", key="clear_page_btn"):
+                    st.session_state.manual_panels = [
+                        p for p in st.session_state.manual_panels if p.page_index != page_idx
+                    ]
+                    st.rerun()
             
-            # Panel management section
-            if st.session_state.manual_panels:
-                st.markdown("**Manage panels:**")
-                
-                # Select panel to edit
-                page_panel_indices = [i for i, p in enumerate(st.session_state.manual_panels) if p.page_index == page_idx]
-                
-                if page_panel_indices:
-                    edit_options = [f"Panel {i+1}" for i in page_panel_indices]
-                    selected_edit = st.selectbox("Select panel to edit", ["None"] + edit_options)
-                    
-                    if selected_edit != "None":
-                        edit_idx = int(selected_edit.split()[1]) - 1
-                        panel = st.session_state.manual_panels[edit_idx]
-                        
-                        st.markdown(f"**Editing Panel {edit_idx + 1}:**")
-                        
-                        edit_x = st.slider("X", 0, img_w, panel.x, key=f"edit_x_{edit_idx}")
-                        edit_y = st.slider("Y", 0, img_h, panel.y, key=f"edit_y_{edit_idx}")
-                        edit_w = st.slider("Width", 10, img_w, panel.width, key=f"edit_w_{edit_idx}")
-                        edit_h = st.slider("Height", 10, img_h, panel.height, key=f"edit_h_{edit_idx}")
-                        
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("💾 Save", key=f"save_{edit_idx}"):
-                                panel.x = edit_x
-                                panel.y = edit_y
-                                panel.width = edit_w
-                                panel.height = edit_h
-                                st.success("Updated!")
-                                st.rerun()
-                        with c2:
-                            if st.button("🗑️ Delete", key=f"del_{edit_idx}"):
-                                st.session_state.manual_panels.pop(edit_idx)
-                                # Reindex
-                                for i, p in enumerate(st.session_state.manual_panels):
-                                    p.panel_index = i
-                                st.rerun()
-            
-            # Global controls
-            st.markdown("---")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                if st.button("🗑️ Clear All Pages"):
+            with btn_cols[2]:
+                if st.button("🗑️ Clear All", key="clear_all_btn"):
                     st.session_state.manual_panels = []
-                    st.success("All panels cleared")
                     st.rerun()
-            with col2:
-                if st.button("🗑️ Clear This Page"):
-                    st.session_state.manual_panels = [p for p in st.session_state.manual_panels if p.page_index != page_idx]
-                    for i, p in enumerate(st.session_state.manual_panels):
-                        p.panel_index = i
-                    st.rerun()
-            with col3:
-                if st.button("✅ Use Manual Panels", type="primary") and st.session_state.manual_panels:
+            
+            with btn_cols[3]:
+                if st.button("✅ Use Panels", type="primary", key="use_panels_btn") and st.session_state.manual_panels:
                     st.session_state.detected_panels = st.session_state.manual_panels.copy()
                     st.session_state.panel_order = list(range(len(st.session_state.manual_panels)))
                     st.success(f"Using {len(st.session_state.detected_panels)} panels")
             
-            # List all panels
-            if st.session_state.manual_panels:
-                st.markdown("**All panels:**")
-                for i, panel in enumerate(st.session_state.manual_panels):
-                    page_str = f"Page {panel.page_index + 1}" if panel.page_index is not None else "Unknown"
-                    st.markdown(f"{i+1}. ({panel.x}, {panel.y}) {panel.width}x{panel.height} — {page_str}")
+            # Canvas editor
+            st.markdown("**Interactive Canvas:**")
+            render_canvas_editor(img, page_panels, key=f"editor_{page_idx}")
+            
+            # Show panel list
+            if page_panels:
+                st.markdown("**Panels on this page:**")
+                for i, panel in enumerate(page_panels):
+                    st.markdown(f"{i+1}. ({panel.x}, {panel.y}) {panel.width}x{panel.height}")
     
     # Display detected panels
     if st.session_state.detected_panels:
