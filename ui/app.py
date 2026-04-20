@@ -65,7 +65,7 @@ def init_session_state():
     if 'detected_panels' not in st.session_state:
         st.session_state.detected_panels = []
     if 'panel_order' not in st.session_state:
-        st.session_state.panel_order = []  # Custom order indices
+        st.session_state.panel_order = []
     if 'preview_frames' not in st.session_state:
         st.session_state.preview_frames = []
     if 'temp_dir' not in st.session_state:
@@ -74,6 +74,12 @@ def init_session_state():
         st.session_state.rendering = False
     if 'show_reorder_ui' not in st.session_state:
         st.session_state.show_reorder_ui = False
+    if 'detection_mode' not in st.session_state:
+        st.session_state.detection_mode = "Auto"
+    if 'manual_panels' not in st.session_state:
+        st.session_state.manual_panels = []  # [(x, y, w, h), ...]
+    if 'current_page' not in st.session_state:
+        st.session_state.current_page = 0
 
 
 def load_comic_file(uploaded_file, temp_dir: str) -> List[np.ndarray]:
@@ -276,18 +282,114 @@ def main():
         if len(st.session_state.loaded_images) > 8:
             st.info(f"... and {len(st.session_state.loaded_images) - 8} more pages")
         
-        # Detect panels button
+        # Detect panels section
         st.header("🔍 Detect Panels")
         
-        if st.button("🔎 Detect Panels", type="primary"):
-            with st.spinner("Analyzing pages..."):
-                st.session_state.detected_panels = detect_panels(
-                    st.session_state.loaded_images,
-                    reading_order
-                )
+        # Mode selection
+        detection_mode = st.radio(
+            "Detection Mode",
+            ["Auto Detect", "Manual Draw"],
+            help="Auto: automatic panel detection. Manual: draw panel regions yourself"
+        )
+        
+        if detection_mode == "Auto Detect":
+            if st.button("🔎 Detect Panels", type="primary"):
+                with st.spinner("Analyzing pages..."):
+                    st.session_state.detected_panels = detect_panels(
+                        st.session_state.loaded_images,
+                        reading_order
+                    )
+                
+                if st.session_state.detected_panels:
+                    st.success(f"Found {len(st.session_state.detected_panels)} panels")
+                    st.session_state.panel_order = list(range(len(st.session_state.detected_panels)))
+        
+        else:  # Manual Draw mode
+            st.info("Manual mode: draw rectangles on the page to define panels")
             
-            if st.session_state.detected_panels:
-                st.success(f"Found {len(st.session_state.detected_panels)} panels")
+            # Page selector for manual mode
+            page_options = [f"Page {i+1}" for i in range(len(st.session_state.loaded_images))]
+            selected_page = st.selectbox("Select page to edit", page_options)
+            page_idx = page_options.index(selected_page)
+            
+            # Show canvas for drawing
+            st.session_state.current_page = page_idx
+            img = st.session_state.loaded_images[page_idx]
+            
+            # Display image with instruction
+            st.markdown("**Click and drag on the image to draw panel regions**")
+            
+            # Canvas for drawing (using streamlit-drawable-canvas if available, else simple inputs)
+            try:
+                from streamlit_drawable_canvas import st_canvas
+                
+                # Initialize canvas
+                canvas_result = st_canvas(
+                    fill_color="rgba(255, 0, 0, 0.3)",
+                    stroke_width=2,
+                    stroke_color="#FF0000",
+                    background_image=Image.fromarray(img),
+                    height=img.shape[0],
+                    width=img.shape[1],
+                    drawing_mode="rect",
+                    key=f"canvas_{page_idx}",
+                )
+                
+                # Process drawn rectangles
+                if canvas_result.json_data is not None:
+                    from core.panel_detector import Panel
+                    
+                    objects = canvas_result.json_data.get("objects", [])
+                    manual_panels = []
+                    
+                    for obj in objects:
+                        if obj.get("type") == "rect":
+                            left = int(obj.get("left", 0))
+                            top = int(obj.get("top", 0))
+                            width = int(obj.get("width", 0))
+                            height = int(obj.get("height", 0))
+                            
+                            if width > 20 and height > 20:
+                                panel = Panel(left, top, width, height)
+                                panel.original_image = img.copy()
+                                panel.page_index = page_idx
+                                manual_panels.append(panel)
+                    
+                    if st.button("✅ Use Manual Panels", type="primary"):
+                        st.session_state.detected_panels = manual_panels
+                        st.session_state.panel_order = list(range(len(manual_panels)))
+                        st.success(f"Created {len(manual_panels)} manual panels")
+                        
+            except ImportError:
+                # Fallback: simple coordinate inputs
+                st.warning("Install streamlit-drawable-canvas for easier drawing:")
+                st.code("pip install streamlit-drawable-canvas")
+                
+                st.markdown("**Enter panel coordinates manually:**")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    x = st.number_input("X", min_value=0, max_value=img.shape[1], value=0)
+                with col2:
+                    y = st.number_input("Y", min_value=0, max_value=img.shape[0], value=0)
+                with col3:
+                    w = st.number_input("Width", min_value=10, max_value=img.shape[1], value=200)
+                with col4:
+                    h = st.number_input("Height", min_value=10, max_value=img.shape[0], value=200)
+                
+                if st.button("➕ Add Panel"):
+                    from core.panel_detector import Panel
+                    panel = Panel(x, y, w, h)
+                    panel.original_image = img.copy()
+                    panel.page_index = page_idx
+                    st.session_state.manual_panels.append(panel)
+                    st.success(f"Panel added! Total: {len(st.session_state.manual_panels)}")
+                
+                if st.button("✅ Use Manual Panels", type="primary") and st.session_state.manual_panels:
+                    st.session_state.detected_panels = st.session_state.manual_panels.copy()
+                    st.session_state.panel_order = list(range(len(st.session_state.manual_panels)))
+                    st.session_state.manual_panels = []  # Clear for next time
+                    st.success(f"Using {len(st.session_state.detected_panels)} manual panels")
     
     # Display detected panels
     if st.session_state.detected_panels:

@@ -1,6 +1,6 @@
 """
 Panel detector for MoFrame.
-Detects comic panels (frames) from page images using computer vision.
+Detects comic panels from page images using edge and line detection.
 """
 
 import numpy as np
@@ -60,7 +60,6 @@ class Panel:
 class PanelDetector:
     """
     Detects comic panels from page images.
-    Uses content projection to find panel boundaries.
     """
 
     def __init__(
@@ -105,8 +104,8 @@ class PanelDetector:
         height, width = gray.shape
         page_area = height * width
 
-        # Strategy: Find panels by splitting on content gaps
-        panels = self._detect_by_projection(gray, page_area, width, height)
+        # Strategy: Find panels by detecting separator lines
+        panels = self._detect_by_lines(gray, page_area, width, height)
 
         # Fallback if no panels found
         if len(panels) < 1:
@@ -123,187 +122,237 @@ class PanelDetector:
 
         return panels
 
-    def _detect_by_projection(
+    def _detect_by_lines(
         self,
         gray: np.ndarray,
         page_area: int,
         width: int,
         height: int
     ) -> List[Panel]:
-        """Detect panels by finding dark separator lines."""
-        # Find very dark pixels (panel borders)
+        """Detect panels by finding separator lines and content gaps."""
+        # Method 1: Look for dark lines (panel borders)
         _, dark = cv2.threshold(gray, 60, 255, cv2.THRESH_BINARY_INV)
         
-        # Dilate horizontally to connect horizontal border segments
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (width // 8, 1))
+        # Morphological operations to find lines
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (width // 15, 1))
+        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, height // 15))
         h_lines = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, h_kernel)
-        
-        # Dilate vertically to connect vertical border segments  
-        v_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, height // 8))
         v_lines = cv2.morphologyEx(dark, cv2.MORPH_CLOSE, v_kernel)
         
-        # Combine
         borders = cv2.add(h_lines, v_lines)
         
-        # Dilate to connect corners
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        borders = cv2.dilate(borders, kernel, iterations=2)
+        # Method 2: Also use edge gaps
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        edges = cv2.dilate(edges, np.ones((5, 5), np.uint8), iterations=2)
         
-        # Invert: borders become black, panels become white
-        panel_mask = cv2.bitwise_not(borders)
+        # Find content bounds from edges
+        rows = np.any(edges, axis=1)
+        cols = np.any(edges, axis=0)
         
-        # Find connected components (panels)
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
-            panel_mask, connectivity=8
-        )
-        
-        panels = []
-        margin = min(width, height) // 40
-        
-        for i in range(1, num_labels):
-            x, y, w, h, area = stats[i]
+        if np.any(rows) and np.any(cols):
+            y_min = np.where(rows)[0][0]
+            y_max = np.where(rows)[0][-1]
+            x_min = np.where(cols)[0][0]
+            x_max = np.where(cols)[0][-1]
             
-            # Skip if covers almost full page
-            if x < margin and y < margin and (x+w) > (width-margin) and (y+h) > (height-margin):
-                continue
+            content = edges[y_min:y_max, x_min:x_max]
             
-            area_ratio = (w * h) / page_area
-            if area_ratio < 0.02:
-                continue
-            if area_ratio > 0.85:
-                continue
+            # Find vertical gaps in edges
+            v_proj = np.sum(content, axis=0)
+            v_norm = v_proj / (np.max(v_proj) + 1e-6)
+            v_gaps = np.where(v_norm < 0.1)[0]
             
-            if w < width // 6 or h < height // 10:
-                continue
+            # Find horizontal gaps
+            h_proj = np.sum(content, axis=1)
+            h_norm = h_proj / (np.max(h_proj) + 1e-6)
+            h_gaps = np.where(h_norm < 0.1)[0]
+            
+            # Add gap positions
+            v_gap_positions = [x_min + g for g in self._cluster_gaps(v_gaps, 10)]
+            h_gap_positions = [y_min + g for g in self._cluster_gaps(h_gaps, 15)]
+        else:
+            v_gap_positions = []
+            h_gap_positions = []
+        
+        # Combine with line-based positions
+        # Find lines in borders
+        border_edges = cv2.Canny(borders, 50, 150)
+        lines = cv2.HoughLinesP(border_edges, 1, np.pi/180, 
+                                threshold=min(width, height)//15,
+                                minLineLength=min(width, height)//6,
+                                maxLineGap=30)
+        
+        h_positions = set([0, height] + h_gap_positions)
+        v_positions = set([0, width] + v_gap_positions)
+        
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                dx = abs(x2 - x1)
+                dy = abs(y2 - y1)
                 
-            aspect = max(w, h) / max(min(w, h), 1)
-            if aspect > 10:
-                continue
-            
-            panels.append(Panel(x, y, w, h))
+                if dx > dy * 4:  # Horizontal
+                    y_avg = (y1 + y2) // 2
+                    if 10 < y_avg < height - 10:
+                        h_positions.add(y_avg)
+                elif dy > dx * 4:  # Vertical
+                    x_avg = (x1 + x2) // 2
+                    if 10 < x_avg < width - 10:
+                        v_positions.add(x_avg)
         
-        # If not enough panels, try content-based approach
-        if len(panels) < 2:
-            panels = self._detect_by_content_gaps(gray, page_area, width, height)
+        # Cluster positions
+        h_positions = self._cluster_positions(sorted(h_positions), threshold=25)
+        v_positions = self._cluster_positions(sorted(v_positions), threshold=25)
+        
+        # Build panels
+        panels = []
+        margin = 2
+        
+        for i in range(len(h_positions) - 1):
+            for j in range(len(v_positions) - 1):
+                x1 = v_positions[j] + margin
+                x2 = v_positions[j + 1] - margin
+                y1 = h_positions[i] + margin
+                y2 = h_positions[i + 1] - margin
+                
+                w = max(0, x2 - x1)
+                h = max(0, y2 - y1)
+                
+                if w < width // 10 or h < height // 12:
+                    continue
+                
+                area_ratio = (w * h) / page_area
+                if area_ratio < 0.015 or area_ratio > 0.95:
+                    continue
+                
+                aspect = max(w, h) / max(min(w, h), 1)
+                if aspect > 12:
+                    continue
+                
+                panels.append(Panel(x1, y1, w, h))
         
         return panels
     
-    def _detect_by_content_gaps(
+    def _cluster_positions(self, positions: List[int], threshold: int) -> List[int]:
+        """Cluster nearby positions."""
+        if len(positions) <= 1:
+            return positions
+        
+        clusters = []
+        current = [positions[0]]
+        
+        for pos in positions[1:]:
+            if pos - current[-1] <= threshold:
+                current.append(pos)
+            else:
+                clusters.append(sum(current) // len(current))
+                current = [pos]
+        
+        clusters.append(sum(current) // len(current))
+        return clusters
+
+    def _detect_by_edges(
         self,
         gray: np.ndarray,
         page_area: int,
         width: int,
         height: int
     ) -> List[Panel]:
-        """Fallback: detect panels by content gaps."""
-        # Binary: content = not pure white
-        _, binary = cv2.threshold(gray, 240, 255, cv2.THRESH_BINARY_INV)
-
-        # Remove small noise
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-
-        # Dilate to connect content within panels
-        dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15))
-        binary = cv2.dilate(binary, dilate_kernel, iterations=2)
-
-        # Find content bounding box
-        rows = np.any(binary, axis=1)
-        cols = np.any(binary, axis=0)
-
+        """Fallback: detect panels by edge gaps."""
+        # Detect edges
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(blurred, 50, 150)
+        
+        # Dilate
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        edges = cv2.dilate(edges, kernel, iterations=2)
+        
+        # Find content bounds
+        rows = np.any(edges, axis=1)
+        cols = np.any(edges, axis=0)
+        
         if not np.any(rows) or not np.any(cols):
             return []
-
-        y_min = max(0, np.where(rows)[0][0] - 5)
-        y_max = min(height, np.where(rows)[0][-1] + 5)
-        x_min = max(0, np.where(cols)[0][0] - 5)
-        x_max = min(width, np.where(cols)[0][-1] + 5)
-
-        content = binary[y_min:y_max, x_min:x_max]
+        
+        y_min = np.where(rows)[0][0]
+        y_max = np.where(rows)[0][-1]
+        x_min = np.where(cols)[0][0]
+        x_max = np.where(cols)[0][-1]
+        
+        content = edges[y_min:y_max, x_min:x_max]
         content_h, content_w = content.shape
-
-        # Analyze horizontal gaps
-        h_proj = np.sum(content, axis=1)
-        h_threshold = np.mean(h_proj) * 0.05  # Lower threshold
-        if h_threshold < 10:
-            h_threshold = 10
-
-        # Find horizontal splits (gaps)
-        h_splits = [0]
-        in_gap = False
-        gap_start = 0
-        min_gap = 8
-
-        for i, val in enumerate(h_proj):
-            if val < h_threshold and not in_gap:
-                in_gap = True
-                gap_start = i
-            elif val >= h_threshold and in_gap:
-                in_gap = False
-                if i - gap_start >= min_gap:
-                    h_splits.append((gap_start + i) // 2)
-
-        if in_gap and content_h - gap_start >= min_gap:
-            h_splits.append(content_h)
-        else:
-            h_splits.append(content_h)
-
-        # Analyze vertical gaps
+        
+        # Find gaps in projections
         v_proj = np.sum(content, axis=0)
-        v_threshold = np.mean(v_proj) * 0.05  # Lower threshold
-        if v_threshold < 10:
-            v_threshold = 10
-
-        v_splits = [0]
-        in_gap = False
-        gap_start = 0
-
-        for i, val in enumerate(v_proj):
-            if val < v_threshold and not in_gap:
-                in_gap = True
-                gap_start = i
-            elif val >= v_threshold and in_gap:
-                in_gap = False
-                if i - gap_start >= min_gap:
-                    v_splits.append((gap_start + i) // 2)
-
-        if in_gap and content_w - gap_start >= min_gap:
-            v_splits.append(content_w)
-        else:
-            v_splits.append(content_w)
-
-        # Remove duplicates and sort
-        h_splits = sorted(set(h_splits))
-        v_splits = sorted(set(v_splits))
-
+        h_proj = np.sum(content, axis=1)
+        
+        # Normalize and threshold
+        v_norm = v_proj / (np.max(v_proj) + 1e-6)
+        h_norm = h_proj / (np.max(h_proj) + 1e-6)
+        
+        # Find low regions (gaps)
+        v_gaps = np.where(v_norm < 0.15)[0]
+        h_gaps = np.where(h_norm < 0.15)[0]
+        
+        # Cluster gaps
+        v_splits = self._cluster_gaps(v_gaps, min_gap=15)
+        h_splits = self._cluster_gaps(h_gaps, min_gap=20)
+        
+        # Add boundaries
+        v_splits = [0] + v_splits + [content_w]
+        h_splits = [0] + h_splits + [content_h]
+        
         # Build panels
         panels = []
-        margin = 3
-
+        margin = 2
+        
         for i in range(len(h_splits) - 1):
             for j in range(len(v_splits) - 1):
                 x1 = x_min + v_splits[j] + margin
                 x2 = x_min + v_splits[j + 1] - margin
                 y1 = y_min + h_splits[i] + margin
                 y2 = y_min + h_splits[i + 1] - margin
-
+                
                 w = max(0, x2 - x1)
                 h = max(0, y2 - y1)
-
-                if w < width // 8 or h < height // 12:
+                
+                if w < width // 8 or h < height // 10:
                     continue
-
+                
                 area_ratio = (w * h) / page_area
-                if area_ratio < 0.015 or area_ratio > 0.95:
+                if area_ratio < 0.02 or area_ratio > 0.95:
                     continue
-
+                
                 aspect = max(w, h) / max(min(w, h), 1)
                 if aspect > 10:
                     continue
-
+                
                 panels.append(Panel(x1, y1, w, h))
-
+        
         return panels
+    
+    def _cluster_gaps(self, gaps: np.ndarray, min_gap: int) -> List[int]:
+        """Cluster consecutive gap positions."""
+        if len(gaps) == 0:
+            return []
+        
+        # Find consecutive regions
+        splits = []
+        start = gaps[0]
+        prev = gaps[0]
+        
+        for g in gaps[1:]:
+            if g - prev > 5:  # Gap in gaps
+                if prev - start >= min_gap:
+                    splits.append((start + prev) // 2)
+                start = g
+            prev = g
+        
+        if prev - start >= min_gap:
+            splits.append((start + prev) // 2)
+        
+        return splits
 
     def _detect_by_fallback(
         self,
