@@ -30,5 +30,11 @@ temp/
 *.mkv
 test-files/
 
+# Debug images
+debug_*.jpg
+page_*.jpg
+page2_analysis.jpg
+panel_detection_*.jpg
+
 # Streamlit
 .streamlit/
