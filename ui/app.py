@@ -14,6 +14,7 @@ import io
 
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit_drawable_canvas import st_canvas
 import numpy as np
 from PIL import Image
 import cv2
@@ -92,7 +93,82 @@ def init_session_state():
         st.session_state.canvas_panels = []
 
 
+def render_drawable_canvas(image: np.ndarray, panels: list, key: str):
+    """Render interactive canvas using streamlit-drawable-canvas."""
+    from PIL import Image
+    
+    # Convert to PIL Image
+    if len(image.shape) == 3 and image.shape[2] == 3:
+        # BGR to RGB
+        img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    else:
+        img_rgb = image
+    
+    pil_img = Image.fromarray(img_rgb)
+    
+    # Create initial drawing data from panels
+    initial_drawing = {"version": "4.2", "objects": []}
+    
+    for i, panel in enumerate(panels):
+        rect = {
+            "type": "rect",
+            "version": "4.2",
+            "originX": "left",
+            "originY": "top",
+            "left": panel.x,
+            "top": panel.y,
+            "width": panel.width,
+            "height": panel.height,
+            "fill": "rgba(255, 0, 0, 0.1)",
+            "stroke": ["#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff"][i % 6],
+            "strokeWidth": 3,
+            "strokeDashArray": None,
+            "strokeLineCap": "butt",
+            "strokeDashOffset": 0,
+            "strokeLineJoin": "miter",
+            "strokeUniform": False,
+            "strokeMiterLimit": 4,
+            "scaleX": 1,
+            "scaleY": 1,
+            "angle": 0,
+            "flipX": False,
+            "flipY": False,
+            "opacity": 1,
+            "shadow": None,
+            "visible": True,
+            "backgroundColor": "",
+            "fillRule": "nonzero",
+            "paintFirst": "fill",
+            "globalCompositeOperation": "source-over",
+            "skewX": 0,
+            "skewY": 0,
+            "rx": 0,
+            "ry": 0,
+            "name": f"panel_{i}"
+        }
+        initial_drawing["objects"].append(rect)
+    
+    # Render canvas
+    canvas_result = st_canvas(
+        fill_color="rgba(255, 0, 0, 0.1)",
+        stroke_width=3,
+        stroke_color="#ff0000",
+        background_image=pil_img,
+        drawing_mode="transform" if panels else "rect",  # Allow move/resize or draw new
+        initial_drawing=initial_drawing if panels else None,
+        height=pil_img.height,
+        width=pil_img.width,
+        key=key,
+    )
+    
+    # Return canvas result for processing
+    return canvas_result
+
+
+# Keep old function for compatibility (not used)
 def render_canvas_editor(image: np.ndarray, panels: list, key: str):
+    """Deprecated: Use render_drawable_canvas instead."""
+    pass
     """Render interactive HTML5 canvas with drag-drop and resize."""
     img_h, img_w = image.shape[:2]
     
@@ -550,44 +626,42 @@ def main():
                     st.session_state.panel_order = list(range(len(st.session_state.manual_panels)))
                     st.success(f"Using {len(st.session_state.detected_panels)} panels")
             
-            # Canvas editor
+            # Canvas editor using streamlit-drawable-canvas
             st.markdown("**Interactive Canvas:**")
-            render_canvas_editor(img, page_panels, key=f"editor_{page_idx}")
+            st.info("🖱️ Drag to move | Drag corners to resize | Draw new rectangle to add panel")
             
-            # Panel editor - allows precise editing
-            if page_panels:
-                st.markdown("**Edit Panel Positions:**")
-                img_h, img_w = img.shape[:2]
+            canvas_result = render_drawable_canvas(img, page_panels, key=f"editor_{page_idx}")
+            
+            # Sync canvas changes back to panels
+            if canvas_result.json_data is not None:
+                objects = canvas_result.json_data.get("objects", [])
+                # Filter only rectangles (panels)
+                rects = [obj for obj in objects if obj.get("type") == "rect"]
                 
-                for i, panel in enumerate(page_panels):
-                    cols = st.columns([1, 1, 1, 1, 0.5])
-                    
-                    with cols[0]:
-                        new_x = st.number_input(f"X{i}", 0, img_w, panel.x, key=f"x_{page_idx}_{i}")
-                    with cols[1]:
-                        new_y = st.number_input(f"Y{i}", 0, img_h, panel.y, key=f"y_{page_idx}_{i}")
-                    with cols[2]:
-                        new_w = st.number_input(f"W{i}", 10, img_w, panel.width, key=f"w_{page_idx}_{i}")
-                    with cols[3]:
-                        new_h = st.number_input(f"H{i}", 10, img_h, panel.height, key=f"h_{page_idx}_{i}")
-                    with cols[4]:
-                        if st.button("🗑️", key=f"del_{page_idx}_{i}"):
-                            st.session_state.manual_panels.remove(panel)
-                            st.rerun()
-                    
-                    # Update panel position
-                    if (new_x != panel.x or new_y != panel.y or new_w != panel.width or new_h != panel.height):
-                        panel.x = new_x
-                        panel.y = new_y
-                        panel.width = new_w
-                        panel.height = new_h
-                        st.rerun()
-            
-            # Show panel list
-            if page_panels:
-                st.markdown("**Panels on this page:**")
-                for i, panel in enumerate(page_panels):
-                    st.markdown(f"{i+1}. ({panel.x}, {panel.y}) {panel.width}x{panel.height}")
+                # Update panel positions
+                for i, obj in enumerate(rects):
+                    if i < len(page_panels):
+                        page_panels[i].x = int(obj.get("left", 0))
+                        page_panels[i].y = int(obj.get("top", 0))
+                        page_panels[i].width = int(obj.get("width", 100))
+                        page_panels[i].height = int(obj.get("height", 100))
+                
+                # Check for new panels (drawn by user)
+                if len(rects) > len(page_panels):
+                    # New rectangles were drawn
+                    for i in range(len(page_panels), len(rects)):
+                        obj = rects[i]
+                        from core.panel_detector import Panel
+                        new_panel = Panel(
+                            int(obj.get("left", 0)),
+                            int(obj.get("top", 0)),
+                            int(obj.get("width", 100)),
+                            int(obj.get("height", 100))
+                        )
+                        new_panel.original_image = img.copy()
+                        new_panel.page_index = page_idx
+                        st.session_state.manual_panels.append(new_panel)
+                    st.rerun()
     
     # Display detected panels
     if st.session_state.detected_panels:
