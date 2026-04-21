@@ -29,6 +29,12 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     startPanel: Panel | null;
   }>({ panelId: null, action: null, handle: null, startX: 0, startY: 0, startPanel: null });
   const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
+  const [localPanels, setLocalPanels] = useState<Panel[]>(panels);
+
+  // Update local panels when props change
+  useEffect(() => {
+    setLocalPanels(panels);
+  }, [panels]);
 
   // Load image
   useEffect(() => {
@@ -56,7 +62,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     // Draw panels
     const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
     
-    panels.forEach((panel, i) => {
+    localPanels.forEach((panel, i) => {
       const color = colors[i % colors.length];
       const isHovered = panel.id === hoveredPanel;
       const isSelected = panel.id === dragState.panelId;
@@ -93,7 +99,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
         });
       }
     });
-  }, [image, panels, hoveredPanel, dragState.panelId]);
+  }, [image, localPanels, hoveredPanel, dragState.panelId]);
 
   useEffect(() => {
     draw();
@@ -139,8 +145,8 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     const { x, y } = getCanvasPos(e);
 
     // Check panels from last to first (top to bottom)
-    for (let i = panels.length - 1; i >= 0; i--) {
-      const panel = panels[i];
+    for (let i = localPanels.length - 1; i >= 0; i--) {
+      const panel = localPanels[i];
       const handle = getHandle(x, y, panel);
 
       if (handle) {
@@ -176,7 +182,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
       width: 100,
       height: 100,
     };
-    onPanelsChange([...panels, newPanel]);
+    setLocalPanels([...localPanels, newPanel]);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -184,8 +190,8 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
 
     if (!dragState.panelId || !dragState.startPanel) {
       // Update hover state
-      for (let i = panels.length - 1; i >= 0; i--) {
-        const panel = panels[i];
+      for (let i = localPanels.length - 1; i >= 0; i--) {
+        const panel = localPanels[i];
         if (isInsidePanel(x, y, panel) || getHandle(x, y, panel)) {
           setHoveredPanel(panel.id);
           return;
@@ -199,7 +205,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     const dy = y - dragState.startY;
     const startPanel = dragState.startPanel;
 
-    const newPanels = panels.map((p) => {
+    const newPanels = localPanels.map((p) => {
       if (p.id !== dragState.panelId) return p;
 
       if (dragState.action === 'move') {
@@ -236,7 +242,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
       return p;
     });
 
-    onPanelsChange(newPanels);
+    setLocalPanels(newPanels);
   };
 
   const handleMouseUp = () => {
@@ -246,13 +252,17 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
   const handleDoubleClick = (e: React.MouseEvent) => {
     const { x, y } = getCanvasPos(e);
 
-    for (let i = panels.length - 1; i >= 0; i--) {
-      const panel = panels[i];
+    for (let i = localPanels.length - 1; i >= 0; i--) {
+      const panel = localPanels[i];
       if (isInsidePanel(x, y, panel)) {
-        onPanelsChange(panels.filter((p) => p.id !== panel.id));
+        setLocalPanels(localPanels.filter((p) => p.id !== panel.id));
         return;
       }
     }
+  };
+
+  const handleApply = () => {
+    onPanelsChange(localPanels);
   };
 
   if (!image) {
@@ -277,6 +287,26 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
       />
       <div style={{ marginTop: '8px', fontSize: '13px', color: '#666' }}>
         🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add
+      </div>
+      <div style={{ marginTop: '16px' }}>
+        <button
+          onClick={handleApply}
+          style={{
+            padding: '10px 24px',
+            fontSize: '16px',
+            backgroundColor: '#4CAF50',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+          }}
+        >
+          ✅ Apply Changes
+        </button>
+        <span style={{ marginLeft: '12px', color: '#666', fontSize: '14px' }}>
+          {localPanels.length} panels
+        </span>
       </div>
     </div>
   );

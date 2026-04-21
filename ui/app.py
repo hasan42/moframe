@@ -596,48 +596,45 @@ def main():
                     st.session_state.panel_order = list(range(len(st.session_state.manual_panels)))
                     st.success(f"Using {len(st.session_state.detected_panels)} panels")
             
-            # Canvas editor using streamlit-drawable-canvas
+            # Canvas editor using React panel editor with Apply button
             st.markdown("**Interactive Canvas:**")
-            st.info("🖱️ Drag rectangles to move | Drag corners to resize | Draw new rectangle to add panel")
+            st.info("🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add | Click Apply to save changes")
             
-            # Show original image first
-            st.markdown("**Original Image:**")
-            st.image(img, use_container_width=True)
+            from components.panel_editor import render_react_panel_editor
             
-            # Canvas for editing panels (without background)
-            st.markdown("**Panel Editor (draw/move rectangles):**")
-            canvas_result = render_drawable_canvas(img, page_panels, key=f"editor_{page_idx}")
+            # Store panels data for React editor
+            editor_key = f"panel_editor_data_{page_idx}"
+            if editor_key not in st.session_state:
+                st.session_state[editor_key] = [
+                    {'x': p.x, 'y': p.y, 'width': p.width, 'height': p.height}
+                    for p in page_panels
+                ]
             
-            # Sync canvas changes back to panels
-            if canvas_result.json_data is not None:
-                objects = canvas_result.json_data.get("objects", [])
-                # Filter only rectangles (panels)
-                rects = [obj for obj in objects if obj.get("type") == "rect"]
+            # Render React editor
+            updated_panels = render_react_panel_editor(
+                img, 
+                page_panels, 
+                page_idx,
+                react_app_url="http://localhost:3000"
+            )
+            
+            # Apply updates if received
+            if updated_panels:
+                # Update manual_panels with new positions from Apply button
+                for i, panel in enumerate(page_panels):
+                    if i < len(updated_panels):
+                        panel.x = updated_panels[i]['x']
+                        panel.y = updated_panels[i]['y']
+                        panel.width = updated_panels[i]['width']
+                        panel.height = updated_panels[i]['height']
                 
-                # Update panel positions
-                for i, obj in enumerate(rects):
-                    if i < len(page_panels):
-                        page_panels[i].x = int(obj.get("left", 0))
-                        page_panels[i].y = int(obj.get("top", 0))
-                        page_panels[i].width = int(obj.get("width", 100))
-                        page_panels[i].height = int(obj.get("height", 100))
-                
-                # Check for new panels (drawn by user)
-                if len(rects) > len(page_panels):
-                    # New rectangles were drawn
-                    for i in range(len(page_panels), len(rects)):
-                        obj = rects[i]
-                        from core.panel_detector import Panel
-                        new_panel = Panel(
-                            int(obj.get("left", 0)),
-                            int(obj.get("top", 0)),
-                            int(obj.get("width", 100)),
-                            int(obj.get("height", 100))
-                        )
-                        new_panel.original_image = img.copy()
-                        new_panel.page_index = page_idx
-                        st.session_state.manual_panels.append(new_panel)
-                    st.rerun()
+                # Update the stored data
+                st.session_state[editor_key] = updated_panels
+                st.success("✅ Changes applied! Panel positions saved.")
+            
+            # Show panel count
+            if page_panels:
+                st.markdown(f"**{len(page_panels)} panels on this page**")
     
     # Display detected panels
     if st.session_state.detected_panels:
