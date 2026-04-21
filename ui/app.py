@@ -94,17 +94,10 @@ def init_session_state():
 
 
 def render_drawable_canvas(image: np.ndarray, panels: list, key: str):
-    """Render interactive canvas using streamlit-drawable-canvas."""
+    """Render interactive canvas using streamlit-drawable-canvas without background image."""
     from PIL import Image
     
-    # Convert to PIL Image
-    if len(image.shape) == 3 and image.shape[2] == 3:
-        # BGR to RGB
-        img_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    else:
-        img_rgb = image
-    
-    pil_img = Image.fromarray(img_rgb)
+    img_h, img_w = image.shape[:2]
     
     # Create initial drawing data from panels
     initial_drawing = {"version": "4.2", "objects": []}
@@ -122,46 +115,23 @@ def render_drawable_canvas(image: np.ndarray, panels: list, key: str):
             "fill": "rgba(255, 0, 0, 0.1)",
             "stroke": ["#ff0000", "#00ff00", "#0000ff", "#ffff00", "#ff00ff", "#00ffff"][i % 6],
             "strokeWidth": 3,
-            "strokeDashArray": None,
-            "strokeLineCap": "butt",
-            "strokeDashOffset": 0,
-            "strokeLineJoin": "miter",
-            "strokeUniform": False,
-            "strokeMiterLimit": 4,
-            "scaleX": 1,
-            "scaleY": 1,
-            "angle": 0,
-            "flipX": False,
-            "flipY": False,
-            "opacity": 1,
-            "shadow": None,
-            "visible": True,
-            "backgroundColor": "",
-            "fillRule": "nonzero",
-            "paintFirst": "fill",
-            "globalCompositeOperation": "source-over",
-            "skewX": 0,
-            "skewY": 0,
-            "rx": 0,
-            "ry": 0,
             "name": f"panel_{i}"
         }
         initial_drawing["objects"].append(rect)
     
-    # Render canvas
+    # Render canvas without background image (pass image dimensions)
     canvas_result = st_canvas(
         fill_color="rgba(255, 0, 0, 0.1)",
         stroke_width=3,
         stroke_color="#ff0000",
-        background_image=pil_img,
-        drawing_mode="transform" if panels else "rect",  # Allow move/resize or draw new
+        background_color="#eee",
+        drawing_mode="transform" if panels else "rect",
         initial_drawing=initial_drawing if panels else None,
-        height=pil_img.height,
-        width=pil_img.width,
+        height=img_h,
+        width=img_w,
         key=key,
     )
     
-    # Return canvas result for processing
     return canvas_result
 
 
@@ -628,8 +598,14 @@ def main():
             
             # Canvas editor using streamlit-drawable-canvas
             st.markdown("**Interactive Canvas:**")
-            st.info("🖱️ Drag to move | Drag corners to resize | Draw new rectangle to add panel")
+            st.info("🖱️ Drag rectangles to move | Drag corners to resize | Draw new rectangle to add panel")
             
+            # Show original image first
+            st.markdown("**Original Image:**")
+            st.image(img, use_container_width=True)
+            
+            # Canvas for editing panels (without background)
+            st.markdown("**Panel Editor (draw/move rectangles):**")
             canvas_result = render_drawable_canvas(img, page_panels, key=f"editor_{page_idx}")
             
             # Sync canvas changes back to panels
