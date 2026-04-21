@@ -1,77 +1,108 @@
-# MoFrame - План работы
+# MoFrame - План работы (Актуализированный)
 
-## Week 1: Фундамент
+## Статус проекта
 
-### Day 1-2: Настройка и загрузка
-- [ ] Инициализация проекта (venv, requirements.txt, структура папок)
-- [ ] Реализация loader.py:
-  - [ ] Загрузка одиночных изображений
-  - [ ] Распаковка ZIP/CBZ
-  - [ ] Распаковка RAR/CBR
-  - [ ] Конвертация PDF в изображения
-- [ ] Тесты на разных форматах
+✅ **Завершено:**
+- Загрузка файлов (CBZ, CBR, PDF, изображения)
+- Автоматическая детекция панелей (contours)
+- Ручное редактирование панелей через React Canvas
+- Рендеринг видео (MP4)
+- 4-step wizard интерфейс (Streamlit)
 
-### Day 3-4: Детекция панелей
-- [ ] Исследование методов детекции
-- [ ] Реализация panel_detector.py (OpenCV contours)
-- [ ] Сортировка панелей (reading order)
-- [ ] Визуализация результатов
-
-### Day 5-7: Морфинг прототип
-- [ ] Исследование библиотек морфинга
-- [ ] Реализация morpher.py
-  - [ ] Feature detection (ORB/SIFT)
-  - [ ] Triangulation
-  - [ ] Warping
-  - [ ] Crossfade blending
-- [ ] Тест: 2 изображения → морфинг → просмотр
-
-## Week 2: Рендер и базовый UI
-
-### Day 8-10: Рендеринг
-- [ ] Реализация sequencer.py (таймлайн)
-- [ ] Реализация renderer.py
-  - [ ] Генерация кадров морфинга
-  - [ ] Сборка в MP4 (moviepy)
-  - [ ] Настройка FPS и битрейта
-  - [ ] Letterbox/pillarbox для сохранения пропорций
-- [ ] End-to-end тест: комикс → видео
-
-### Day 11-14: Streamlit UI
-- [ ] Базовый интерфейс
-  - [ ] Загрузка файлов
-  - [ ] Отображение детектированных панелей
-  - [ ] Кнопка "Сгенерировать"
-  - [ ] Прогресс-бар
-- [ ] Просмотр результата
-
-## Week 3: Полировка
-
-### Day 15-17: Улучшения
-- [ ] Ручная корректировка последовательности панелей
-- [ ] Настройка длительности для каждого перехода
-- [ ] Параметры морфинга (количество промежуточных кадров)
-- [ ] Preview mode (быстрый просмотр без рендера)
-
-### Day 18-21: Багфикс и оптимизация
-- [ ] Обработка ошибок
-- [ ] Логирование
-- [ ] Оптимизация памяти
-- [ ] Тесты на разных комиксах
-
-## Week 4: Финал
-
-### Day 22-25: Дополнительные фичи
-- [ ] Поддержка аудио
-- [ ] Batch processing (несколько комиксов)
-- [ ] Пресеты (Instagram, TikTok, YouTube)
-
-### Day 26-28: Документация
-- [ ] README с примерами
-- [ ] Инструкция по установке
-- [ ] Демо-видео
+🔧 **В работе:**
+- Улучшение синхронизации React ↔ Streamlit
+- Добавление аудио
+- Batch processing
 
 ---
 
-## Текущий фокус
-**Сейчас:** Day 1 — инициализация проекта
+## Архитектура проекта
+
+```
+moframe/
+├── core/                  # Python backend
+│   ├── loader.py          # Загрузка файлов
+│   ├── panel_detector.py  # Детекция панелей
+│   ├── morpher.py         # Морфинг между панелями
+│   └── renderer.py        # Рендер в MP4
+├── ui/                    # Streamlit interface
+│   ├── app.py             # Main wizard application
+│   └── components/
+│       └── panel_editor.py # React Canvas wrapper
+├── ui-react/              # React frontend
+│   └── src/
+│       └── PanelEditor.tsx # Interactive Canvas editor
+└── tests/                 # Unit tests
+```
+
+---
+
+## Текущий workflow (4 шага)
+
+### Step 1: Upload
+- Поддержка: CBZ, CBR, PDF, JPG, PNG, WEBP
+- Авто-извлечение страниц
+- Предпросмотр загруженных страниц
+
+### Step 2: Panel Detection
+- **Auto Detect:** Автоматическая детекция через OpenCV contours
+- **Manual Draw:** Ручное создание панелей
+- Выбор порядка чтения (L-to-R или R-to-L)
+
+### Step 3: Edit Panels
+- **React Canvas Editor:**
+  - Drag to move
+  - Drag corners to resize
+  - Double-click to delete
+  - Click empty space to add
+  - Copy JSON для экспорта
+- **Fine-tune Fields:**
+  - Точные значения X/Y/Width/Height
+  - Кнопка Delete для каждой панели
+
+### Step 4: Render
+- Настройки:
+  - Transition type (Ken Burns, Crossfade, Slide, Zoom)
+  - Duration settings
+  - FPS (12-60)
+  - Resolution (Full HD, HD, SD)
+- Результат: MP4 файл скачиванием
+
+---
+
+## Известные ограничения
+
+1. **React ↔ Streamlit sync:** Canvas работает изолированно, данные передаются через JSON copy/paste
+2. **Браузер:** React dev server должен быть запущен отдельно (localhost:3000)
+3. **Морфинг:** Пока базовый (Ken Burns, Crossfade), без AI-генерации
+
+---
+
+## Следующие шаги
+
+- [ ] Улучшить синхронизацию React-Streamlit (WebSocket?)
+- [ ] Добавить AI-based морфинг (Stable Diffusion?)
+- [ ] Поддержка аудио дорожки
+- [ ] Batch processing (несколько файлов)
+- [ ] Пресеты для соцсетей (9:16 для Reels/TikTok)
+- [ ] Docker container для easy deploy
+
+---
+
+## Запуск для разработки
+
+```bash
+# Terminal 1 - React dev server
+cd ui-react && npm run dev
+
+# Terminal 2 - Streamlit
+cd ui && streamlit run app.py
+```
+
+---
+
+## Зависимости
+
+- Python 3.9+
+- Node.js 18+
+- FFmpeg (для рендера)
