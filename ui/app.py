@@ -299,14 +299,26 @@ def step_3_edit():
     )
     
     if updated_panels:
-        # Update manual_panels with new positions
-        for i, panel in enumerate(page_panels):
-            if i < len(updated_panels):
-                panel.x = updated_panels[i]['x']
-                panel.y = updated_panels[i]['y']
-                panel.width = updated_panels[i]['width']
-                panel.height = updated_panels[i]['height']
+        # Completely replace panels with editor data (handles add/delete/resize)
+        from core.panel_detector import Panel
+        new_panels = []
+        for p_data in updated_panels:
+            panel = Panel(p_data['x'], p_data['y'], p_data['width'], p_data['height'])
+            panel.original_image = img.copy()
+            panel.page_index = page_idx
+            new_panels.append(panel)
+        
+        # Replace panels for this page only
+        if st.session_state.detected_panels:
+            # Remove old panels for this page and add new ones
+            other_panels = [p for p in st.session_state.detected_panels if getattr(p, 'page_index', 0) != page_idx]
+            st.session_state.detected_panels = other_panels + new_panels
+        else:
+            other_panels = [p for p in st.session_state.manual_panels if getattr(p, 'page_index', 0) != page_idx]
+            st.session_state.manual_panels = other_panels + new_panels
+        
         st.success("✅ Changes applied from editor!")
+        st.rerun()
     
     # Also show simple editor for precise adjustments
     st.markdown("### Fine-tune Positions")
