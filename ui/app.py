@@ -194,7 +194,7 @@ def render_canvas_editor(image: np.ndarray, panels: list, key: str):
                 if (hit) {{
                     selected = panels[i];
                     startX = x; startY = y;
-                    startPanel = {{...p: selected}};
+                    startPanel = {{...selected}};
                     if (hit === 'move') dragging = true;
                     else {{ resizing = true; resizeCorner = hit; }}
                     draw();
@@ -215,19 +215,19 @@ def render_canvas_editor(image: np.ndarray, panels: list, key: str):
             const dy = y - startY;
             
             if (dragging) {{
-                selected.x = Math.max(0, Math.min(canvas.width - selected.w, startPanel.p.x + dx));
-                selected.y = Math.max(0, Math.min(canvas.height - selected.h, startPanel.p.y + dy));
+                selected.x = Math.max(0, Math.min(canvas.width - selected.w, startPanel.x + dx));
+                selected.y = Math.max(0, Math.min(canvas.height - selected.h, startPanel.y + dy));
             }} else {{
-                if (resizeCorner.includes('e')) selected.w = Math.max(MIN, startPanel.p.w + dx);
+                if (resizeCorner.includes('e')) selected.w = Math.max(MIN, startPanel.w + dx);
                 if (resizeCorner.includes('w')) {{
-                    const nw = Math.max(MIN, startPanel.p.w - dx);
-                    selected.x = startPanel.p.x + (startPanel.p.w - nw);
+                    const nw = Math.max(MIN, startPanel.w - dx);
+                    selected.x = startPanel.x + (startPanel.w - nw);
                     selected.w = nw;
                 }}
-                if (resizeCorner.includes('s')) selected.h = Math.max(MIN, startPanel.p.h + dy);
+                if (resizeCorner.includes('s')) selected.h = Math.max(MIN, startPanel.h + dy);
                 if (resizeCorner.includes('n')) {{
-                    const nh = Math.max(MIN, startPanel.p.h - dy);
-                    selected.y = startPanel.p.y + (startPanel.p.h - nh);
+                    const nh = Math.max(MIN, startPanel.h - dy);
+                    selected.y = startPanel.y + (startPanel.h - nh);
                     selected.h = nh;
                 }}
             }}
@@ -279,6 +279,7 @@ def render_canvas_editor(image: np.ndarray, panels: list, key: str):
 
 
 
+def load_comic_file(uploaded_file, temp_dir):
     """Load comic from uploaded file."""
     if uploaded_file is None:
         return []
@@ -473,7 +474,7 @@ def main():
         cols = st.columns(min(4, len(st.session_state.loaded_images)))
         for i, img in enumerate(st.session_state.loaded_images[:8]):  # Show first 8
             with cols[i % len(cols)]:
-                st.image(img, caption=f"Page {i+1}", use_column_width=True)
+                st.image(img, caption=f"Page {i+1}", use_container_width=True)
         
         if len(st.session_state.loaded_images) > 8:
             st.info(f"... and {len(st.session_state.loaded_images) - 8} more pages")
@@ -552,6 +553,35 @@ def main():
             # Canvas editor
             st.markdown("**Interactive Canvas:**")
             render_canvas_editor(img, page_panels, key=f"editor_{page_idx}")
+            
+            # Panel editor - allows precise editing
+            if page_panels:
+                st.markdown("**Edit Panel Positions:**")
+                img_h, img_w = img.shape[:2]
+                
+                for i, panel in enumerate(page_panels):
+                    cols = st.columns([1, 1, 1, 1, 0.5])
+                    
+                    with cols[0]:
+                        new_x = st.number_input(f"X{i}", 0, img_w, panel.x, key=f"x_{page_idx}_{i}")
+                    with cols[1]:
+                        new_y = st.number_input(f"Y{i}", 0, img_h, panel.y, key=f"y_{page_idx}_{i}")
+                    with cols[2]:
+                        new_w = st.number_input(f"W{i}", 10, img_w, panel.width, key=f"w_{page_idx}_{i}")
+                    with cols[3]:
+                        new_h = st.number_input(f"H{i}", 10, img_h, panel.height, key=f"h_{page_idx}_{i}")
+                    with cols[4]:
+                        if st.button("🗑️", key=f"del_{page_idx}_{i}"):
+                            st.session_state.manual_panels.remove(panel)
+                            st.rerun()
+                    
+                    # Update panel position
+                    if (new_x != panel.x or new_y != panel.y or new_w != panel.width or new_h != panel.height):
+                        panel.x = new_x
+                        panel.y = new_y
+                        panel.width = new_w
+                        panel.height = new_h
+                        st.rerun()
             
             # Show panel list
             if page_panels:
