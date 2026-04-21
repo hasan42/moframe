@@ -330,11 +330,11 @@ def step_3_edit():
             with st.expander(f"Panel {i+1}: ({panel.x}, {panel.y}) {panel.width}x{panel.height}", expanded=False):
                 col1, col2 = st.columns(2)
                 with col1:
-                    new_x = st.number_input(f"X", 0, img_w, panel.x, key=f"x_{page_idx}_{i}")
-                    new_y = st.number_input(f"Y", 0, img_h, panel.y, key=f"y_{page_idx}_{i}")
+                    new_x = st.number_input(f"X", 0, img_w, int(panel.x), key=f"x_{page_idx}_{i}")
+                    new_y = st.number_input(f"Y", 0, img_h, int(panel.y), key=f"y_{page_idx}_{i}")
                 with col2:
-                    new_w = st.number_input(f"Width", 10, img_w, panel.width, key=f"w_{page_idx}_{i}")
-                    new_h = st.number_input(f"Height", 10, img_h, panel.height, key=f"h_{page_idx}_{i}")
+                    new_w = st.number_input(f"Width", 10, img_w, int(panel.width), key=f"w_{page_idx}_{i}")
+                    new_h = st.number_input(f"Height", 10, img_h, int(panel.height), key=f"h_{page_idx}_{i}")
                 
                 if (new_x != panel.x or new_y != panel.y or new_w != panel.width or new_h != panel.height):
                     panel.x = new_x
