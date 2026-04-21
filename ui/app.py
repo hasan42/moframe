@@ -285,25 +285,31 @@ def step_3_edit():
         page_panels = []
         st.warning("No panels yet. Add panels below.")
     
-    # Show image with panel overlay
-    if page_panels:
-        preview_img = img.copy()
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255), (0, 255, 255)]
-        
-        for i, panel in enumerate(page_panels):
-            color = colors[i % len(colors)]
-            cv2.rectangle(preview_img, (panel.x, panel.y), 
-                        (panel.x + panel.width, panel.y + panel.height), 
-                        color, 3)
-            cv2.putText(preview_img, str(i+1), (panel.x + 5, panel.y + 25),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
-        
-        st.image(preview_img, caption="Current panels", use_container_width=True)
-    else:
-        st.image(img, caption="Original page", use_container_width=True)
+    # React Panel Editor
+    st.markdown("### Interactive Canvas Editor")
+    st.info("🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add")
     
-    # Simple panel editor with number inputs
-    st.markdown("### Edit Panel Positions")
+    from components.panel_editor import render_react_panel_editor
+    
+    updated_panels = render_react_panel_editor(
+        img, 
+        page_panels, 
+        page_idx,
+        react_app_url="http://localhost:3000"
+    )
+    
+    if updated_panels:
+        # Update manual_panels with new positions
+        for i, panel in enumerate(page_panels):
+            if i < len(updated_panels):
+                panel.x = updated_panels[i]['x']
+                panel.y = updated_panels[i]['y']
+                panel.width = updated_panels[i]['width']
+                panel.height = updated_panels[i]['height']
+        st.success("✅ Changes applied from editor!")
+    
+    # Also show simple editor for precise adjustments
+    st.markdown("### Fine-tune Positions")
     
     if page_panels:
         img_h, img_w = img.shape[:2]
@@ -332,23 +338,29 @@ def step_3_edit():
                         st.session_state.manual_panels.remove(panel)
                     st.rerun()
     
-    # Add new panel button
-    if st.button("➕ Add Panel", type="secondary"):
-        from core.panel_detector import Panel
-        img_h, img_w = img.shape[:2]
-        new_w, new_h = img_w // 3, img_h // 3
-        panel = Panel(
-            (img_w - new_w) // 2,
-            (img_h - new_h) // 2,
-            new_w, new_h
-        )
-        panel.original_image = img.copy()
-        panel.page_index = page_idx
-        if st.session_state.detected_panels:
-            st.session_state.detected_panels.append(panel)
-        else:
-            st.session_state.manual_panels.append(panel)
-        st.rerun()
+    # Add new panel button (adds to editor)
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        if st.button("➕ Add Panel", type="secondary", use_container_width=True):
+            from core.panel_detector import Panel
+            img_h, img_w = img.shape[:2]
+            new_w, new_h = img_w // 3, img_h // 3
+            panel = Panel(
+                (img_w - new_w) // 2,
+                (img_h - new_h) // 2,
+                new_w, new_h
+            )
+            panel.original_image = img.copy()
+            panel.page_index = page_idx
+            if st.session_state.detected_panels:
+                st.session_state.detected_panels.append(panel)
+            else:
+                st.session_state.manual_panels.append(panel)
+            st.rerun()
+    
+    with col_btn2:
+        if page_panels and st.button("🔄 Refresh Editor", type="secondary", use_container_width=True):
+            st.rerun()
 
 
 def step_4_render():
