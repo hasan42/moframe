@@ -9,9 +9,22 @@ import io
 
 def render_react_panel_editor(image: np.ndarray, panels: list, page_idx: int, react_app_url: str = "http://localhost:3000"):
     """
-    Render React panel editor with Apply button.
-    Returns updated panels dict or None.
+    Render React panel editor.
+    Uses a simple approach: React editor shows JSON, user copies it to text area.
     """
+    
+    # Session state key for result
+    result_key = f"panel_editor_result_{page_idx}"
+    
+    # Check if we have pasted data
+    if result_key in st.session_state and st.session_state[result_key]:
+        try:
+            data = json.loads(st.session_state[result_key])
+            # Clear it
+            st.session_state[result_key] = ""
+            return data
+        except:
+            pass
     
     # Convert image to base64
     if len(image.shape) == 3:
@@ -38,9 +51,7 @@ def render_react_panel_editor(image: np.ndarray, panels: list, page_idx: int, re
         for i, panel in enumerate(panels)
     ]
     
-    storage_key = f"panel_editor_{page_idx}"
-    
-    # Create two columns: editor and controls
+    # Create columns
     col_editor, col_controls = st.columns([4, 1])
     
     with col_editor:
@@ -52,6 +63,7 @@ def render_react_panel_editor(image: np.ndarray, panels: list, page_idx: int, re
             <script>
                 (function() {{
                     const frame = document.getElementById('frame_{page_idx}');
+                    
                     const initData = {{
                         type: 'INIT',
                         imageUrl: 'data:image/png;base64,{img_b64}',
@@ -67,18 +79,6 @@ def render_react_panel_editor(image: np.ndarray, panels: list, page_idx: int, re
                             frame.contentWindow.postMessage(initData, '*');
                         }}
                     }}, 500);
-                    
-                    window.addEventListener('message', (e) => {{
-                        if (e.data.type === 'PANELS_APPLY') {{
-                            localStorage.setItem('{storage_key}', JSON.stringify(e.data.panels));
-                            // Show visual notification
-                            const notif = document.createElement('div');
-                            notif.textContent = '✓ Changes saved! Click "Load" button.';
-                            notif.style.cssText = 'position:fixed;top:20px;right:20px;background:#4CAF50;color:white;padding:12px 20px;border-radius:5px;z-index:9999;font-weight:bold;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
-                            document.body.appendChild(notif);
-                            setTimeout(() => notif.remove(), 4000);
-                        }}
-                    }});
                 }})();
             </script>
         </div>
@@ -89,35 +89,26 @@ def render_react_panel_editor(image: np.ndarray, panels: list, page_idx: int, re
     with col_controls:
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # Button to load updated panels from localStorage
-        if st.button("🔄 Load Changes", key=f"load_{page_idx}", type="primary"):
-            # JavaScript to extract from localStorage and update query params
-            load_html = f"""
-            <script>
-                (function() {{
-                    const data = localStorage.getItem('{storage_key}');
-                    if (data) {{
-                        // Update URL with panels data
-                        const url = new URL(window.location);
-                        url.searchParams.set('panels_{page_idx}', data);
-                        window.history.replaceState({{}}, '', url);
-                        localStorage.removeItem('{storage_key}');
-                    }}
-                }})();
-            </script>
-            """
-            components.html(load_html, height=0)
-            st.rerun()
-    
-    # Check for updated panels in query params
-    query_key = f'panels_{page_idx}'
-    if query_key in st.query_params:
-        try:
-            updated_data = json.loads(st.query_params[query_key])
-            # Clear from query params
-            del st.query_params[query_key]
-            return updated_data
-        except:
-            pass
+        # Instructions
+        st.info("1️⃣ Edit panels in canvas\\n2️⃣ Click '📋 Copy JSON' in canvas\\n3️⃣ Paste below and click 'Apply'")
+        
+        # Text area for pasted JSON
+        pasted_data = st.text_area(
+            "Paste panel JSON here:",
+            key=f"panel_paste_{page_idx}",
+            height=100,
+            placeholder='[{\"id\": \"panel_0\", \"x\": 100, \"y\": 100, \"width\": 200, \"height\": 300}, ...]'
+        )
+        
+        if st.button("✅ Apply Changes", key=f"apply_{page_idx}", type="primary", use_container_width=True):
+            if pasted_data:
+                try:
+                    data = json.loads(pasted_data)
+                    st.session_state[result_key] = pasted_data
+                    st.rerun()
+                except json.JSONDecodeError as e:
+                    st.error(f"Invalid JSON: {e}")
+            else:
+                st.warning("Please paste the JSON data from the canvas editor")
     
     return None

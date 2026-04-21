@@ -11,15 +11,16 @@ interface Panel {
 interface PanelEditorProps {
   imageUrl: string;
   panels: Panel[];
-  onPanelsChange: (panels: Panel[]) => void;
+  onPanelsChange?: (panels: Panel[]) => void;
 }
 
 const HANDLE_SIZE = 10;
 const MIN_SIZE = 30;
 
-export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPanelsChange }) => {
+export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [localPanels, setLocalPanels] = useState<Panel[]>(panels);
   const [dragState, setDragState] = useState<{
     panelId: string | null;
     action: 'move' | 'resize' | null;
@@ -29,7 +30,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     startPanel: Panel | null;
   }>({ panelId: null, action: null, handle: null, startX: 0, startY: 0, startPanel: null });
   const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
-  const [localPanels, setLocalPanels] = useState<Panel[]>(panels);
+  const [showJson, setShowJson] = useState(false);
 
   // Update local panels when props change
   useEffect(() => {
@@ -51,15 +52,12 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Set canvas size to match image
     canvas.width = image.width;
     canvas.height = image.height;
 
-    // Clear and draw image
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(image, 0, 0);
 
-    // Draw panels
     const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
     
     localPanels.forEach((panel, i) => {
@@ -71,26 +69,23 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
       ctx.lineWidth = isHovered || isSelected ? 4 : 2;
       ctx.strokeRect(panel.x, panel.y, panel.width, panel.height);
 
-      // Fill with semi-transparent color
-      ctx.fillStyle = color + '1A'; // 10% opacity
+      ctx.fillStyle = color + '1A';
       ctx.fillRect(panel.x, panel.y, panel.width, panel.height);
 
-      // Draw label
       ctx.fillStyle = color;
       ctx.font = 'bold 16px Arial';
       ctx.fillText(String(i + 1), panel.x + 5, panel.y + 20);
 
-      // Draw resize handles if hovered or selected
       if (isHovered || isSelected) {
         ctx.fillStyle = '#fff';
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 1;
 
         const corners = [
-          [panel.x, panel.y], // nw
-          [panel.x + panel.width, panel.y], // ne
-          [panel.x, panel.y + panel.height], // sw
-          [panel.x + panel.width, panel.y + panel.height], // se
+          [panel.x, panel.y],
+          [panel.x + panel.width, panel.y],
+          [panel.x, panel.y + panel.height],
+          [panel.x + panel.width, panel.y + panel.height],
         ];
 
         corners.forEach(([cx, cy]) => {
@@ -105,7 +100,6 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     draw();
   }, [draw]);
 
-  // Get cursor position on canvas
   const getCanvasPos = (e: React.MouseEvent): { x: number; y: number } => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
@@ -119,7 +113,6 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     };
   };
 
-  // Check if point is on resize handle
   const getHandle = (x: number, y: number, panel: Panel): string | null => {
     const corners = [
       [panel.x, panel.y, 'nw'],
@@ -136,7 +129,6 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     return null;
   };
 
-  // Check if point is inside panel
   const isInsidePanel = (x: number, y: number, panel: Panel): boolean => {
     return x >= panel.x && x <= panel.x + panel.width && y >= panel.y && y <= panel.y + panel.height;
   };
@@ -144,7 +136,6 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
   const handleMouseDown = (e: React.MouseEvent) => {
     const { x, y } = getCanvasPos(e);
 
-    // Check panels from last to first (top to bottom)
     for (let i = localPanels.length - 1; i >= 0; i--) {
       const panel = localPanels[i];
       const handle = getHandle(x, y, panel);
@@ -174,7 +165,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
       }
     }
 
-    // Clicked outside - create new panel
+    // Create new panel
     const newPanel: Panel = {
       id: `panel_${Date.now()}`,
       x: x - 50,
@@ -189,7 +180,6 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     const { x, y } = getCanvasPos(e);
 
     if (!dragState.panelId || !dragState.startPanel) {
-      // Update hover state
       for (let i = localPanels.length - 1; i >= 0; i--) {
         const panel = localPanels[i];
         if (isInsidePanel(x, y, panel) || getHandle(x, y, panel)) {
@@ -261,8 +251,11 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
     }
   };
 
-  const handleApply = () => {
-    onPanelsChange(localPanels);
+  const handleCopyJson = () => {
+    const json = JSON.stringify(localPanels, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+      setShowJson(true);
+    });
   };
 
   if (!image) {
@@ -288,13 +281,13 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
       <div style={{ marginTop: '8px', fontSize: '13px', color: '#666' }}>
         🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add
       </div>
-      <div style={{ marginTop: '16px' }}>
+      <div style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
         <button
-          onClick={handleApply}
+          onClick={handleCopyJson}
           style={{
-            padding: '10px 24px',
-            fontSize: '16px',
-            backgroundColor: '#4CAF50',
+            padding: '10px 20px',
+            fontSize: '14px',
+            backgroundColor: '#2196F3',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
@@ -302,12 +295,32 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels, onPa
             fontWeight: 'bold',
           }}
         >
-          ✅ Apply Changes
+          📋 Copy JSON
         </button>
-        <span style={{ marginLeft: '12px', color: '#666', fontSize: '14px' }}>
+        <span style={{ color: '#666', fontSize: '14px', alignSelf: 'center' }}>
           {localPanels.length} panels
         </span>
       </div>
+      {showJson && (
+        <div style={{ marginTop: '16px' }}>
+          <textarea
+            readOnly
+            value={JSON.stringify(localPanels, null, 2)}
+            style={{
+              width: '100%',
+              height: '200px',
+              fontFamily: 'monospace',
+              fontSize: '12px',
+              padding: '10px',
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+            }}
+          />
+          <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+            JSON copied to clipboard! Paste it in Streamlit and click "Apply Changes"
+          </p>
+        </div>
+      )}
     </div>
   );
 };
