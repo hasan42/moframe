@@ -38,3 +38,6 @@ panel_detection_*.jpg
 
 # Streamlit
 .streamlit/
+
+# Component build (keep build folder for custom component)
+!ui/components/panel_editor_component/build/
