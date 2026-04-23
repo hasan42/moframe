@@ -21,8 +21,12 @@ import numpy as np
 from PIL import Image
 import cv2
 
-# HTTP server for React -> Streamlit sync
-panel_update_queue = Queue()
+# HTTP server for React -> Streamlit sync - use global queue that persists
+import queue
+
+if '_panel_queue' not in globals():
+    _panel_queue = queue.Queue()
+    print("DEBUG: Created new queue")
 
 class PanelHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -39,8 +43,9 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             body = self.rfile.read(content_len)
             print(f"DEBUG: Body: {body[:200]}")
             data = json.loads(body)
-            panel_update_queue.put(data)
-            print(f"DEBUG: Added to queue, size now: {panel_update_queue.qsize()}")
+            global _panel_queue
+            _panel_queue.put(data)
+            print(f"DEBUG: Queue size now: {_panel_queue.qsize()}")
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -53,12 +58,17 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
 
 def start_panel_server():
     """Start HTTP server for panel updates."""
-    try:
-        server = http.server.HTTPServer(('localhost', 8765), PanelHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-    except OSError:
-        pass  # Port already in use
+    global _server_started
+    if '_server_started' not in globals():
+        try:
+            server = http.server.HTTPServer(('localhost', 8765), PanelHandler)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            _server_started = True
+            print("DEBUG: HTTP server started on port 8765")
+        except OSError as e:
+            print(f"DEBUG: Server may already be running: {e}")
+            _server_started = True
 
 start_panel_server()
 
@@ -330,9 +340,9 @@ def step_3_edit():
         st.warning("No panels yet. Add panels below.")
     
     # Check for auto-sync panel updates from React editor
-    if not panel_update_queue.empty():
+    if not _panel_queue.empty():
         try:
-            data = panel_update_queue.get_nowait()
+            data = _panel_queue.get_nowait()
             print(f"DEBUG: Received data: {data}")
             if data.get('panels'):
                 from core.panel_detector import Panel
@@ -369,16 +379,45 @@ def step_3_edit():
         react_app_url="http://localhost:5173"
     )
     
-    # Sync button (fallback)
+    # Auto-sync from React editor
     import queue
-    queue_size = panel_update_queue.qsize()
+    queue_size = _panel_queue.qsize()
     st.write(f"DEBUG: Queue size: {queue_size}")
     
+    if not _panel_queue.empty():
+        try:
+            data = _panel_queue.get_nowait()
+            st.write(f"DEBUG: Auto-sync received data: {data}")
+            if data.get('panels'):
+                from core.panel_detector import Panel
+                new_panels = []
+                for p_data in data['panels']:
+                    panel = Panel(p_data['x'], p_data['y'], p_data['width'], p_data['height'])
+                    panel.original_image = img.copy()
+                    panel.page_index = page_idx
+                    new_panels.append(panel)
+                
+                # Update session state
+                if st.session_state.detected_panels:
+                    other_panels = [p for p in st.session_state.detected_panels if getattr(p, 'page_index', 0) != page_idx]
+                    st.session_state.detected_panels = other_panels + new_panels
+                else:
+                    other_panels = [p for p in st.session_state.manual_panels if getattr(p, 'page_index', 0) != page_idx]
+                    st.session_state.manual_panels = other_panels + new_panels
+                
+                st.success(f"✅ Auto-synced {len(new_panels)} panels from editor!")
+                st.rerun()
+        except Exception as e:
+            st.error(f"Auto-sync error: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+    
+    # Manual sync button (fallback)
     if st.button("🔄 Sync from Editor", type="secondary"):
-        st.write(f"DEBUG: Button clicked, checking queue...")
-        if not panel_update_queue.empty():
+        st.write(f"DEBUG: Button clicked, queue size: {_panel_queue.qsize()}")
+        if not _panel_queue.empty():
             try:
-                data = panel_update_queue.get_nowait()
+                data = _panel_queue.get_nowait()
                 st.write(f"DEBUG: Received data: {data}")
                 if data.get('panels'):
                     from core.panel_detector import Panel
