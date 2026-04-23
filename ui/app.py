@@ -295,7 +295,7 @@ def step_3_edit():
         img, 
         page_panels, 
         page_idx,
-        react_app_url="http://localhost:3000"
+        react_app_url="http://localhost:5173"
     )
     
     if updated_panels:
