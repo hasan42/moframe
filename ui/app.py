@@ -530,6 +530,54 @@ def step_4_render():
     
     st.success(f"✅ Ready to render {len(panels)} panels")
     
+    # Preview section
+    st.markdown("### 👁️ Preview")
+    st.info("Generate a preview of the first transition before rendering the full video")
+    
+    if st.button("👁️ Preview First Transition", type="secondary", use_container_width=True):
+        # Parse resolution
+        res_map = {
+            "1920x1080 (Full HD)": (1920, 1080),
+            "1280x720 (HD)": (1280, 720),
+            "854x480 (SD)": (854, 480)
+        }
+        
+        strategy_map = {
+            "Ken Burns": MorphStrategy.KEN_BURNS,
+            "Crossfade": MorphStrategy.CROSSFADE,
+            "Slide": MorphStrategy.SLIDE,
+            "Zoom": MorphStrategy.ZOOM
+        }
+        
+        preview_config = RenderConfig(
+            fps=fps,
+            resolution=res_map.get(resolution, (1280, 720)),
+            panel_duration_frames=1,  # Just 1 frame for panel
+            transition_duration_frames=10,  # 10 frames for transition
+            transition_strategy=strategy_map.get(transition_type, MorphStrategy.KEN_BURNS),
+            output_path=str(Path(st.session_state.temp_dir) / "preview.mp4")
+        )
+        
+        with st.spinner("Generating preview..."):
+            renderer = Renderer(preview_config)
+            
+            # Get first two panels
+            if len(panels) >= 2:
+                panel1, panel2 = panels[0], panels[1]
+                preview_frames = renderer._generate_transition_frames(panel1, panel2)
+                
+                # Show frames as images
+                st.markdown("**Preview frames:**")
+                cols = st.columns(min(len(preview_frames), 5))
+                for i, (col, frame) in enumerate(zip(cols, preview_frames)):
+                    col.image(frame, caption=f"Frame {i+1}", use_container_width=True)
+                
+                st.success(f"✅ Preview generated: {len(preview_frames)} frames")
+            else:
+                st.warning("Need at least 2 panels for transition preview")
+    
+    st.markdown("---")
+    
     # Settings sidebar
     with st.sidebar:
         st.header("⚙️ Render Settings")
