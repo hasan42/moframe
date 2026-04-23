@@ -1,3 +1,3 @@
 import React from 'react';
-declare const _default: React.ComponentType<{}>;
-export default _default;
+declare const App: React.ComponentType<{}>;
+export default App;
