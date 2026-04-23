@@ -367,11 +367,16 @@ def step_3_edit():
     )
     
     # Sync button (fallback)
+    import queue
+    queue_size = panel_update_queue.qsize()
+    st.write(f"DEBUG: Queue size: {queue_size}")
+    
     if st.button("🔄 Sync from Editor", type="secondary"):
+        st.write(f"DEBUG: Button clicked, checking queue...")
         if not panel_update_queue.empty():
             try:
                 data = panel_update_queue.get_nowait()
-                print(f"DEBUG: Received data: {data}")
+                st.write(f"DEBUG: Received data: {data}")
                 if data.get('panels'):
                     from core.panel_detector import Panel
                     new_panels = []
@@ -392,13 +397,13 @@ def step_3_edit():
                     st.success(f"✅ Synced {len(new_panels)} panels from editor!")
                     st.rerun()
                 else:
-                    st.info("ℹ️ No updates from editor")
+                    st.info("ℹ️ No panels in data")
             except Exception as e:
                 st.error(f"Sync error: {e}")
                 import traceback
-                traceback.print_exc()
+                st.code(traceback.format_exc())
         else:
-            st.info("ℹ️ No updates from editor")
+            st.info("ℹ️ Queue is empty - no updates from editor")
     
     # Also show simple editor for precise adjustments
     st.markdown("### Fine-tune Positions")
