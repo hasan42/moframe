@@ -1,6 +1,7 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { render } from 'react-dom';
-import { Streamlit, withStreamlitConnection, ComponentProps } from 'streamlit-component-lib';
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import { Streamlit, withStreamlitConnection } from 'streamlit-component-lib';
+import { useRef, useEffect, useState, useCallback } from 'react';
 
 interface Panel {
   id: string;
@@ -13,11 +14,19 @@ interface Panel {
 const HANDLE_SIZE = 10;
 const MIN_SIZE = 30;
 
+interface ComponentProps {
+  args: {
+    imageUrl: string;
+    panels: Panel[];
+    pageIdx: number;
+  };
+}
+
 const PanelEditor: React.FC<ComponentProps> = (props) => {
   const { args } = props;
-  const imageUrl = args.imageUrl as string;
-  const initialPanels = (args.panels as Panel[]) || [];
-  const pageIdx = args.pageIdx as number;
+  const imageUrl = args.imageUrl;
+  const initialPanels = args.panels || [];
+  const pageIdx = args.pageIdx;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -44,49 +53,37 @@ const PanelEditor: React.FC<ComponentProps> = (props) => {
     }
   }, [imageUrl]);
 
+  useEffect(() => {
+    Streamlit.setFrameHeight();
+  }, []);
+
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || !image) return;
-
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-
     canvas.width = image.width;
     canvas.height = image.height;
-
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(image, 0, 0);
-
     const colors = ['#ff0000', '#00ff00', '#0000ff', '#ffff00', '#ff00ff', '#00ffff'];
-    
     localPanels.forEach((panel, i) => {
       const color = colors[i % colors.length];
       const isHovered = panel.id === hoveredPanel;
       const isSelected = panel.id === dragState.panelId;
-
       ctx.strokeStyle = color;
       ctx.lineWidth = isHovered || isSelected ? 4 : 2;
       ctx.strokeRect(panel.x, panel.y, panel.width, panel.height);
-
       ctx.fillStyle = color + '1A';
       ctx.fillRect(panel.x, panel.y, panel.width, panel.height);
-
       ctx.fillStyle = color;
       ctx.font = 'bold 16px Arial';
       ctx.fillText(String(i + 1), panel.x + 5, panel.y + 20);
-
       if (isHovered || isSelected) {
         ctx.fillStyle = '#fff';
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 1;
-
-        const corners = [
-          [panel.x, panel.y],
-          [panel.x + panel.width, panel.y],
-          [panel.x, panel.y + panel.height],
-          [panel.x + panel.width, panel.y + panel.height],
-        ];
-
+        const corners = [[panel.x, panel.y], [panel.x + panel.width, panel.y], [panel.x, panel.y + panel.height], [panel.x + panel.width, panel.y + panel.height]];
         corners.forEach(([cx, cy]) => {
           ctx.fillRect(cx - HANDLE_SIZE / 2, cy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
           ctx.strokeRect(cx - HANDLE_SIZE / 2, cy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
@@ -95,9 +92,7 @@ const PanelEditor: React.FC<ComponentProps> = (props) => {
     });
   }, [image, localPanels, hoveredPanel, dragState.panelId]);
 
-  useEffect(() => {
-    draw();
-  }, [draw]);
+  useEffect(() => { draw(); }, [draw]);
 
   const getCanvasPos = (e: React.MouseEvent): { x: number; y: number } => {
     const canvas = canvasRef.current;
@@ -105,23 +100,13 @@ const PanelEditor: React.FC<ComponentProps> = (props) => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    };
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
   };
 
   const getHandle = (x: number, y: number, panel: Panel): string | null => {
-    const corners = [
-      [panel.x, panel.y, 'nw'],
-      [panel.x + panel.width, panel.y, 'ne'],
-      [panel.x, panel.y + panel.height, 'sw'],
-      [panel.x + panel.width, panel.y + panel.height, 'se'],
-    ] as [number, number, string][];
+    const corners: [number, number, string][] = [[panel.x, panel.y, 'nw'], [panel.x + panel.width, panel.y, 'ne'], [panel.x, panel.y + panel.height, 'sw'], [panel.x + panel.width, panel.y + panel.height, 'se']];
     for (const [cx, cy, type] of corners) {
-      if (Math.abs(x - cx) < HANDLE_SIZE && Math.abs(y - cy) < HANDLE_SIZE) {
-        return type;
-      }
+      if (Math.abs(x - cx) < HANDLE_SIZE && Math.abs(y - cy) < HANDLE_SIZE) return type;
     }
     return null;
   };
@@ -168,26 +153,14 @@ const PanelEditor: React.FC<ComponentProps> = (props) => {
     const newPanels = localPanels.map((p) => {
       if (p.id !== dragState.panelId) return p;
       if (dragState.action === 'move') {
-        return {
-          ...p,
-          x: Math.max(0, Math.min(canvasRef.current!.width - p.width, startPanel.x + dx)),
-          y: Math.max(0, Math.min(canvasRef.current!.height - p.height, startPanel.y + dy)),
-        };
+        return { ...p, x: Math.max(0, Math.min(canvasRef.current!.width - p.width, startPanel.x + dx)), y: Math.max(0, Math.min(canvasRef.current!.height - p.height, startPanel.y + dy)) };
       }
       if (dragState.action === 'resize' && dragState.handle) {
         let newPanel = { ...p };
         if (dragState.handle.includes('e')) newPanel.width = Math.max(MIN_SIZE, startPanel.width + dx);
-        if (dragState.handle.includes('w')) {
-          const nw = Math.max(MIN_SIZE, startPanel.width - dx);
-          newPanel.x = startPanel.x + (startPanel.width - nw);
-          newPanel.width = nw;
-        }
+        if (dragState.handle.includes('w')) { const nw = Math.max(MIN_SIZE, startPanel.width - dx); newPanel.x = startPanel.x + (startPanel.width - nw); newPanel.width = nw; }
         if (dragState.handle.includes('s')) newPanel.height = Math.max(MIN_SIZE, startPanel.height + dy);
-        if (dragState.handle.includes('n')) {
-          const nh = Math.max(MIN_SIZE, startPanel.height - dy);
-          newPanel.y = startPanel.y + (startPanel.height - nh);
-          newPanel.height = nh;
-        }
+        if (dragState.handle.includes('n')) { const nh = Math.max(MIN_SIZE, startPanel.height - dy); newPanel.y = startPanel.y + (startPanel.height - nh); newPanel.height = nh; }
         return newPanel;
       }
       return p;
@@ -236,4 +209,12 @@ const PanelEditor: React.FC<ComponentProps> = (props) => {
   );
 };
 
-export default withStreamlitConnection(PanelEditor);
+const App = withStreamlitConnection(PanelEditor);
+
+const container = document.getElementById('root');
+if (container) {
+  const root = createRoot(container);
+  root.render(<App />);
+}
+
+export default App;
