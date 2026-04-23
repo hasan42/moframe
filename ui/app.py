@@ -23,10 +23,16 @@ import cv2
 
 # HTTP server for React -> Streamlit sync - use global queue that persists
 import queue
+import builtins
 
-if '_panel_queue' not in globals():
-    _panel_queue = queue.Queue()
-    print("DEBUG: Created new queue")
+# Store queue in builtins to survive module reloads
+if not hasattr(builtins, '_moframe_panel_queue'):
+    builtins._moframe_panel_queue = queue.Queue()
+    print("DEBUG: Created new queue in builtins")
+else:
+    print(f"DEBUG: Reusing existing queue, size: {builtins._moframe_panel_queue.qsize()}")
+
+_panel_queue = builtins._moframe_panel_queue
 
 class PanelHandler(http.server.BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -45,7 +51,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             data = json.loads(body)
             global _panel_queue
             _panel_queue.put(data)
-            print(f"DEBUG: Queue size now: {_panel_queue.qsize()}")
+            print(f"DEBUG: Added to queue, size now: {_panel_queue.qsize()}")
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -54,21 +60,22 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'{"status": "ok"}')
     
     def log_message(self, format, *args):
-        pass  # Quiet
+        print(f"HTTP: {format % args}")  # Enable logging
 
 def start_panel_server():
     """Start HTTP server for panel updates."""
-    global _server_started
-    if '_server_started' not in globals():
+    if not hasattr(builtins, '_panel_server_started'):
         try:
             server = http.server.HTTPServer(('localhost', 8765), PanelHandler)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
-            _server_started = True
+            builtins._panel_server_started = True
             print("DEBUG: HTTP server started on port 8765")
         except OSError as e:
             print(f"DEBUG: Server may already be running: {e}")
-            _server_started = True
+            builtins._panel_server_started = True
+    else:
+        print("DEBUG: Server already started")
 
 start_panel_server()
 
