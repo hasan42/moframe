@@ -21,6 +21,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [localPanels, setLocalPanels] = useState<Panel[]>(panels);
+  const [isDragging, setIsDragging] = useState(false);
   const [dragState, setDragState] = useState<{
     panelId: string | null;
     action: 'move' | 'resize' | null;
@@ -30,7 +31,18 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
     startPanel: Panel | null;
   }>({ panelId: null, action: null, handle: null, startX: 0, startY: 0, startPanel: null });
   const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
-  const [showJson, setShowJson] = useState(false);
+
+  // Send panels to Streamlit when they change and not dragging
+  useEffect(() => {
+    if (!isDragging) {
+      sendToStreamlit(localPanels);
+    }
+  }, [localPanels, isDragging]);
+
+  // Track dragging state
+  useEffect(() => {
+    setIsDragging(!!dragState.panelId);
+  }, [dragState.panelId]);
 
   // Update local panels when props change
   useEffect(() => {
@@ -173,7 +185,9 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
       width: 100,
       height: 100,
     };
-    setLocalPanels([...localPanels, newPanel]);
+    const updatedPanels = [...localPanels, newPanel];
+    setLocalPanels(updatedPanels);
+    sendToStreamlit(updatedPanels);
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
@@ -239,23 +253,31 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
     setDragState({ panelId: null, action: null, handle: null, startX: 0, startY: 0, startPanel: null });
   };
 
+  // Send panels to Streamlit HTTP server
+  const sendToStreamlit = async (panels: Panel[]) => {
+    try {
+      await fetch('http://localhost:8765/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ panels }),
+      });
+    } catch (err) {
+      console.log('Streamlit not ready or offline');
+    }
+  };
+
   const handleDoubleClick = (e: React.MouseEvent) => {
     const { x, y } = getCanvasPos(e);
 
     for (let i = localPanels.length - 1; i >= 0; i--) {
       const panel = localPanels[i];
       if (isInsidePanel(x, y, panel)) {
-        setLocalPanels(localPanels.filter((p) => p.id !== panel.id));
+        const updatedPanels = localPanels.filter((p) => p.id !== panel.id);
+        setLocalPanels(updatedPanels);
+        sendToStreamlit(updatedPanels);
         return;
       }
     }
-  };
-
-  const handleCopyJson = () => {
-    const json = JSON.stringify(localPanels, null, 2);
-    navigator.clipboard.writeText(json).then(() => {
-      setShowJson(true);
-    });
   };
 
   if (!image) {
@@ -281,46 +303,11 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
       <div style={{ marginTop: '8px', fontSize: '13px', color: '#666' }}>
         🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add
       </div>
-      <div style={{ marginTop: '16px', display: 'flex', gap: '10px' }}>
-        <button
-          onClick={handleCopyJson}
-          style={{
-            padding: '10px 20px',
-            fontSize: '14px',
-            backgroundColor: '#2196F3',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontWeight: 'bold',
-          }}
-        >
-          📋 Copy JSON
-        </button>
-        <span style={{ color: '#666', fontSize: '14px', alignSelf: 'center' }}>
-          {localPanels.length} panels
+      <div style={{ marginTop: '16px' }}>
+        <span style={{ color: '#4CAF50', fontSize: '14px' }}>
+          ✅ Auto-sync enabled — {localPanels.length} panels
         </span>
       </div>
-      {showJson && (
-        <div style={{ marginTop: '16px' }}>
-          <textarea
-            readOnly
-            value={JSON.stringify(localPanels, null, 2)}
-            style={{
-              width: '100%',
-              height: '200px',
-              fontFamily: 'monospace',
-              fontSize: '12px',
-              padding: '10px',
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-            }}
-          />
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
-            JSON copied to clipboard! Paste it in Streamlit and click "Apply Changes"
-          </p>
-        </div>
-      )}
     </div>
   );
 };

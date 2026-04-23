@@ -11,12 +11,53 @@ from typing import List, Optional
 import json
 import base64
 import io
+import http.server
+import threading
+from queue import Queue
 
 import streamlit as st
 import streamlit.components.v1 as components
 import numpy as np
 from PIL import Image
 import cv2
+
+# HTTP server for React -> Streamlit sync
+panel_update_queue = Queue()
+
+class PanelHandler(http.server.BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+    
+    def do_POST(self):
+        if self.path == '/update':
+            content_len = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_len)
+            data = json.loads(body)
+            panel_update_queue.put(data)
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(b'{"status": "ok"}')
+    
+    def log_message(self, format, *args):
+        pass  # Quiet
+
+def start_panel_server():
+    """Start HTTP server for panel updates."""
+    try:
+        server = http.server.HTTPServer(('localhost', 8765), PanelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+    except OSError:
+        pass  # Port already in use
+
+start_panel_server()
 
 # Add parent directory to path for imports
 import sys
@@ -284,6 +325,32 @@ def step_3_edit():
     else:
         page_panels = []
         st.warning("No panels yet. Add panels below.")
+    
+    # Check for WebSocket panel updates
+    if not panel_update_queue.empty():
+        try:
+            data = panel_update_queue.get_nowait()
+            if data.get('panels'):
+                from core.panel_detector import Panel
+                new_panels = []
+                for p_data in data['panels']:
+                    panel = Panel(p_data['x'], p_data['y'], p_data['width'], p_data['height'])
+                    panel.original_image = img.copy()
+                    panel.page_index = page_idx
+                    new_panels.append(panel)
+                
+                # Update session state
+                if st.session_state.detected_panels:
+                    other_panels = [p for p in st.session_state.detected_panels if getattr(p, 'page_index', 0) != page_idx]
+                    st.session_state.detected_panels = other_panels + new_panels
+                else:
+                    other_panels = [p for p in st.session_state.manual_panels if getattr(p, 'page_index', 0) != page_idx]
+                    st.session_state.manual_panels = other_panels + new_panels
+                
+                page_panels = new_panels
+                st.toast("✅ Panels updated from editor", icon="🔄")
+        except Exception:
+            pass
     
     # React Panel Editor
     st.markdown("### Interactive Canvas Editor")
