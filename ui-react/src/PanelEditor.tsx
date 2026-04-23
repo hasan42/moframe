@@ -255,14 +255,16 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
 
   // Send panels to Streamlit HTTP server
   const sendToStreamlit = async (panels: Panel[]) => {
+    console.log('Sending to Streamlit:', panels);
     try {
-      await fetch('http://localhost:8765/update', {
+      const response = await fetch('http://localhost:8765/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ panels }),
       });
+      console.log('Response:', response.status);
     } catch (err) {
-      console.log('Streamlit not ready or offline');
+      console.error('Error sending to Streamlit:', err);
     }
   };
 

@@ -330,6 +330,7 @@ def step_3_edit():
     if not panel_update_queue.empty():
         try:
             data = panel_update_queue.get_nowait()
+            print(f"DEBUG: Received data: {data}")
             if data.get('panels'):
                 from core.panel_detector import Panel
                 new_panels = []
@@ -347,11 +348,16 @@ def step_3_edit():
                     other_panels = [p for p in st.session_state.manual_panels if getattr(p, 'page_index', 0) != page_idx]
                     st.session_state.manual_panels = other_panels + new_panels
                 
-                page_panels = new_panels
-                st.toast("✅ Panels updated from editor", icon="🔄")
+                st.toast(f"✅ Panels updated: {len(new_panels)} panels", icon="🔄")
                 st.rerun()
-        except Exception:
-            pass
+            else:
+                print(f"DEBUG: No panels in data: {data}")
+        except Exception as e:
+            print(f"DEBUG: Error processing update: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"DEBUG: Queue is empty")
     
     # React Panel Editor
     st.markdown("### Interactive Canvas Editor")
