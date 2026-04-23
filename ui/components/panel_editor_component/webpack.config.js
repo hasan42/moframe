@@ -23,11 +23,13 @@ module.exports = {
     filename: 'static/js/main.js',
     path: path.resolve(__dirname, 'build'),
     clean: true,
+    publicPath: './',
   },
   plugins: [
     new HtmlWebpackPlugin({
       template: './public/index.html',
       filename: 'index.html',
+      inject: 'body',
     }),
   ],
   mode: 'production',
