@@ -326,7 +326,7 @@ def step_3_edit():
         page_panels = []
         st.warning("No panels yet. Add panels below.")
     
-    # Check for WebSocket panel updates
+    # Check for auto-sync panel updates from React editor
     if not panel_update_queue.empty():
         try:
             data = panel_update_queue.get_nowait()
@@ -352,7 +352,7 @@ def step_3_edit():
                 st.rerun()
         except Exception as e:
             print(f"DEBUG: Error: {e}")
-    
+
     # React Panel Editor
     st.markdown("### Interactive Canvas Editor")
     st.info("🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add | ✅ Auto-sync enabled")
@@ -366,7 +366,7 @@ def step_3_edit():
         react_app_url="http://localhost:5173"
     )
     
-    # Sync button
+    # Sync button (fallback)
     if st.button("🔄 Sync from Editor", type="secondary"):
         if not panel_update_queue.empty():
             try:
