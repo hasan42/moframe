@@ -1,28 +1,49 @@
 # MoFrame — План улучшений
 
+## 🐞 Известные баги (Tech Debt)
+
+### Тесты: 2 из 21 падают
+
+| Тест | Проблема | Приоритет |
+|------|----------|-----------|
+| `test_zoom` | Zoom < 1.0 увеличивает вместо уменьшения. `_apply_zoom` неправильно считает new_w/new_h когда zoom < 1 | Низкий |
+| `test_detect_single_panel` | Детектор находит 4 панели вместо 1. Пороги слишком чувствительные для искусственных изображений | Низкий |
+
+**Записано:** 2026-04-23
+
+---
+
 ## 🔴 Критичные (P0)
 
 ### 1. Улучшить React ↔ Streamlit синхронизацию
 **Проблема:** JSON copy/paste — неудобно, ломает workflow
 
+**Статус:** ⚠️ **ОТКАТ** — Streamlit Custom Component не заработал, вернулись к iframe с copy/paste
+
 **Решения:**
-- **Вариант A:** Streamlit Custom Component ✅ **В РАБОТЕ**
-  - Упаковать React как настоящий Streamlit component
-  - Двусторонняя связь через `componentValue`
-  - Требует: `streamlit-component-lib`, сборка через webpack
+- **Вариант A:** Streamlit Custom Component ❌ **НЕ РАБОТАЕТ**
+  - Попытка упаковать React как component провалилась
+  - Проблемы: iframe sandbox, 404 ошибки, CORS
+  - **Вывод:** Нужен другой подход
   
-- **Вариант B:** WebSocket между React и Streamlit
+- **Вариант B:** WebSocket между React и Streamlit ⭐ **РЕКОМЕНДУЕТСЯ**
   - React отправляет на localhost:XXXX при Apply
   - Streamlit слушает и обновляет session_state
-  - Быстрее в реализации, но менее надёжно
+  - Быстрее в реализации, надёжнее чем component
 
 - **Вариант C:** Заменить React на `streamlit-drawable-canvas`
   - Готовый компонент с синхронизацией
   - Меньше функционала (нет resize handles)
   - Самый быстрый вариант
 
-**Оценка:** 4-8 часов
-**Приоритет:** Вариант A (долгосрочно)
+**Текущий workaround:**
+- React dev server на `localhost:5173`
+- iframe в Streamlit загружает редактор
+- JSON copy/paste для синхронизации
+- Кнопка "Apply Changes" для применения
+
+**Оценка:** 2-4 часа (Вариант B)
+**Приоритет:** Высокий
 
 ---
 
@@ -121,32 +142,27 @@
 
 | Неделя | Задачи |
 |--------|--------|
-| **1** | P0-1 (синхронизация), P0-2 (preview) |
+| **1** | P0-2 (preview), P0-1 Вариант B (WebSocket) |
 | **2** | P1-5 (пресеты), P1-4 (аудио) |
 | **3** | P1-3 (морфинг research) |
-| **4** | P2-6 (batch), P2-8 (экспорт) |
+| **4** | P2-6 (batch), P2-8 (экспорт), Tech Debt (баги) |
 
 ---
 
 ## 🎯 Текущий статус
 
-**P0-1 Вариант A:** Streamlit Custom Component — ✅ **ГОТОВО**
+**P0-1 Вариант A:** Streamlit Custom Component — ❌ **ОТКАТ** (не работает)
 
-Компонент создан и собран. Следующий шаг — тестирование.
+Рабочий вариант: iframe + JSON copy/paste
 
-**План:**
-1. ✅ Создать структуру Streamlit component
-2. ✅ Настроить webpack для сборки
-3. ✅ Интегрировать React Canvas Editor
-4. ✅ Реализовать передачу данных через `componentValue`
-5. ✅ Обновить `app.py` для использования компонента
+**Попытка Custom Component:**
+- Создана структура в `ui/components/panel_editor_component/`
+- Настроен webpack с html-webpack-plugin
+- Компонент не загружается в Streamlit (404, CORS, iframe sandbox)
+- **Вывод:** Streamlit Custom Component с React — слишком сложно
 
-**Ожидаемый результат:**
-- Пользователь редактирует панели в Canvas
-- При изменении данные автоматически обновляются в Streamlit
-- Никакого copy/paste
-- Кнопка "Apply" не нужна — изменения применяются мгновенно
+**Следующий шаг:** P0-1 Вариант B (WebSocket) или P0-2 (Preview)
 
 ---
 
-Последнее обновление: 2026-04-21
+Последнее обновление: 2026-04-23
