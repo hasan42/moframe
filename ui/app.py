@@ -350,14 +350,8 @@ def step_3_edit():
                 
                 st.toast(f"✅ Panels updated: {len(new_panels)} panels", icon="🔄")
                 st.rerun()
-            else:
-                print(f"DEBUG: No panels in data: {data}")
         except Exception as e:
-            print(f"DEBUG: Error processing update: {e}")
-            import traceback
-            traceback.print_exc()
-    else:
-        print(f"DEBUG: Queue is empty")
+            print(f"DEBUG: Error: {e}")
     
     # React Panel Editor
     st.markdown("### Interactive Canvas Editor")
@@ -371,6 +365,40 @@ def step_3_edit():
         page_idx,
         react_app_url="http://localhost:5173"
     )
+    
+    # Sync button
+    if st.button("🔄 Sync from Editor", type="secondary"):
+        if not panel_update_queue.empty():
+            try:
+                data = panel_update_queue.get_nowait()
+                print(f"DEBUG: Received data: {data}")
+                if data.get('panels'):
+                    from core.panel_detector import Panel
+                    new_panels = []
+                    for p_data in data['panels']:
+                        panel = Panel(p_data['x'], p_data['y'], p_data['width'], p_data['height'])
+                        panel.original_image = img.copy()
+                        panel.page_index = page_idx
+                        new_panels.append(panel)
+                    
+                    # Update session state
+                    if st.session_state.detected_panels:
+                        other_panels = [p for p in st.session_state.detected_panels if getattr(p, 'page_index', 0) != page_idx]
+                        st.session_state.detected_panels = other_panels + new_panels
+                    else:
+                        other_panels = [p for p in st.session_state.manual_panels if getattr(p, 'page_index', 0) != page_idx]
+                        st.session_state.manual_panels = other_panels + new_panels
+                    
+                    st.success(f"✅ Synced {len(new_panels)} panels from editor!")
+                    st.rerun()
+                else:
+                    st.info("ℹ️ No updates from editor")
+            except Exception as e:
+                st.error(f"Sync error: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            st.info("ℹ️ No updates from editor")
     
     # Also show simple editor for precise adjustments
     st.markdown("### Fine-tune Positions")
