@@ -285,17 +285,17 @@ def step_3_edit():
         page_panels = []
         st.warning("No panels yet. Add panels below.")
     
-    # React Panel Editor (Streamlit Custom Component)
+    # React Panel Editor
     st.markdown("### Interactive Canvas Editor")
     st.info("🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add")
     
-    from components.panel_editor_component import render_panel_editor
+    from components.panel_editor import render_react_panel_editor
     
-    updated_panels = render_panel_editor(
+    updated_panels = render_react_panel_editor(
         img, 
         page_panels, 
         page_idx,
-        key=f"panel_editor_{page_idx}"
+        react_app_url="http://localhost:3000"
     )
     
     if updated_panels:
@@ -317,7 +317,7 @@ def step_3_edit():
             other_panels = [p for p in st.session_state.manual_panels if getattr(p, 'page_index', 0) != page_idx]
             st.session_state.manual_panels = other_panels + new_panels
         
-        st.success("✅ Changes applied automatically!")
+        st.success("✅ Changes applied from editor!")
         st.rerun()
     
     # Also show simple editor for precise adjustments
