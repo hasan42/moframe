@@ -33,11 +33,14 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_POST(self):
+        print(f"DEBUG: Received POST to {self.path}")
         if self.path == '/update':
             content_len = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_len)
+            print(f"DEBUG: Body: {body[:200]}")
             data = json.loads(body)
             panel_update_queue.put(data)
+            print(f"DEBUG: Added to queue, size now: {panel_update_queue.qsize()}")
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

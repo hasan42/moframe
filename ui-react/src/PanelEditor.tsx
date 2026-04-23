@@ -31,6 +31,7 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
     startPanel: Panel | null;
   }>({ panelId: null, action: null, handle: null, startX: 0, startY: 0, startPanel: null });
   const [hoveredPanel, setHoveredPanel] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
 
   // Send panels to Streamlit when they change and not dragging
   useEffect(() => {
@@ -255,16 +256,24 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
 
   // Send panels to Streamlit HTTP server
   const sendToStreamlit = async (panels: Panel[]) => {
-    console.log('Sending to Streamlit:', panels);
+    console.log('Sending to Streamlit:', panels.length, 'panels');
+    setSyncStatus('sending');
     try {
       const response = await fetch('http://localhost:8765/update', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ panels }),
       });
-      console.log('Response:', response.status);
+      console.log('Response status:', response.status);
+      if (response.ok) {
+        setSyncStatus('sent');
+        setTimeout(() => setSyncStatus('idle'), 1000);
+      } else {
+        setSyncStatus('error');
+      }
     } catch (err) {
       console.error('Error sending to Streamlit:', err);
+      setSyncStatus('error');
     }
   };
 
@@ -306,8 +315,15 @@ export const PanelEditor: React.FC<PanelEditorProps> = ({ imageUrl, panels }) =>
         🖱️ Drag to move | Drag corners to resize | Double-click to delete | Click empty space to add
       </div>
       <div style={{ marginTop: '16px' }}>
-        <span style={{ color: '#4CAF50', fontSize: '14px' }}>
-          ✅ Auto-sync enabled — {localPanels.length} panels
+        <span style={{ 
+          color: syncStatus === 'error' ? '#f44336' : syncStatus === 'sent' ? '#4CAF50' : '#666', 
+          fontSize: '14px',
+          transition: 'color 0.3s'
+        }}>
+          {syncStatus === 'sending' && '⏳ Sending...'}
+          {syncStatus === 'sent' && '✅ Sent!'}
+          {syncStatus === 'error' && '❌ Failed to sync'}
+          {syncStatus === 'idle' && `✅ Auto-sync enabled — ${localPanels.length} panels`}
         </span>
       </div>
     </div>
