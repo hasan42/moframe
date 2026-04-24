@@ -293,10 +293,12 @@ def step_2_panels():
                 progress.empty()
                 
                 st.success(f"✅ Found {len(all_panels)} panels!")
-                
-                if st.button("➡️ Continue to Edit Panels", type="primary"):
-                    st.session_state.step = 3
-                    st.rerun()
+        
+        # Show Continue button AFTER panels are detected (outside the Detect button block)
+        if st.session_state.detected_panels:
+            if st.button("➡️ Continue to Edit Panels", type="primary"):
+                st.session_state.step = 3
+                st.rerun()
     
     else:
         # Manual mode
