@@ -607,6 +607,60 @@ def step_4_render():
             panel_duration = st.slider("Panel Duration (sec)", 0.5, max_panel_time, min(2.0, max_panel_time), 0.5)
         else:
             panel_duration = st.slider("Panel Duration (sec)", 0.5, 5.0, 2.0, 0.5)
+        
+        # --- Audio Track Section ---
+        st.markdown("---")
+        st.subheader("🎵 Audio Track")
+        
+        audio_file = st.file_uploader(
+            "Upload audio (MP3, WAV, OGG, M4A)",
+            type=['mp3', 'wav', 'ogg', 'm4a', 'aac'],
+            help="Optional background music or voiceover"
+        )
+        
+        audio_path = None
+        if audio_file:
+            # Save uploaded audio
+            audio_path = str(Path(st.session_state.temp_dir) / audio_file.name)
+            with open(audio_path, 'wb') as f:
+                f.write(audio_file.getvalue())
+            st.success(f"✅ Audio: {audio_file.name}")
+            
+            # Audio controls
+            col_audio1, col_audio2 = st.columns(2)
+            with col_audio1:
+                audio_fade_in = st.slider("Fade In (sec)", 0.0, 2.0, 0.5, 0.1)
+            with col_audio2:
+                audio_fade_out = st.slider("Fade Out (sec)", 0.0, 2.0, 0.5, 0.1)
+            
+            audio_volume = st.slider("Volume", 0.0, 2.0, 1.0, 0.05)
+            
+            # Auto-fit option
+            auto_fit_audio = st.checkbox(
+                "🔄 Auto-fit video to audio duration",
+                value=False,
+                help="Adjust panel duration so video length matches audio"
+            )
+            
+            if auto_fit_audio:
+                try:
+                    from moviepy.editor import AudioFileClip
+                    audio_clip = AudioFileClip(audio_path)
+                    audio_duration = audio_clip.duration
+                    audio_clip.close()
+                    
+                    # Calculate panel duration to match audio
+                    total_transition_time = num_transitions * transition_duration
+                    available_panel_time = audio_duration - total_transition_time
+                    if num_panels > 0 and available_panel_time > 0:
+                        suggested_panel_dur = available_panel_time / num_panels
+                        st.info(f"💡 Suggested panel duration: {suggested_panel_dur:.2f}s (to match {audio_duration:.1f}s audio)")
+                except Exception as e:
+                    st.warning(f"Could not analyze audio: {e}")
+        else:
+            audio_fade_in = 0.5
+            audio_fade_out = 0.5
+            audio_volume = 1.0
     
     # Preview section
     st.markdown("### 👁️ Preview")
@@ -695,12 +749,36 @@ def step_4_render():
             "Zoom": MorphStrategy.ZOOM
         }
         
+        # Handle auto-fit to audio duration
+        render_panel_duration = panel_duration
+        if audio_file and auto_fit_audio:
+            try:
+                from moviepy.editor import AudioFileClip
+                audio_clip = AudioFileClip(audio_path)
+                audio_duration = audio_clip.duration
+                audio_clip.close()
+                
+                # Recalculate panel duration to match audio
+                total_transition_time = num_transitions * transition_duration
+                available_time = audio_duration - total_transition_time
+                if num_panels > 0 and available_time > 0:
+                    render_panel_duration = available_time / num_panels
+                    st.info(f"🎵 Auto-fitted: {render_panel_duration:.2f}s per panel (total {audio_duration:.1f}s)")
+                else:
+                    st.warning("Audio too short for auto-fit, using manual duration")
+            except Exception as e:
+                st.warning(f"Auto-fit failed: {e}, using manual duration")
+        
         config = RenderConfig(
             fps=fps,
             resolution=res_map.get(resolution, (1280, 720)),
-            panel_duration_frames=int(panel_duration * fps),
+            panel_duration_frames=int(render_panel_duration * fps),
             transition_duration_frames=int(transition_duration * fps),
             transition_strategy=strategy_map.get(transition_type, MorphStrategy.KEN_BURNS),
+            audio_path=audio_path,
+            audio_fade_in=audio_fade_in,
+            audio_fade_out=audio_fade_out,
+            audio_volume=audio_volume,
             output_path=str(Path(st.session_state.temp_dir) / output_filename)
         )
         

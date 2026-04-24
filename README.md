@@ -2,6 +2,48 @@
 
 Comic to animation converter with interactive panel editing and frame-by-frame morphing.
 
+## Features
+
+### Core
+- 📁 **Upload** - CBZ, CBR, PDF, ZIP, RAR, and image files (JPG, PNG, WEBP)
+- 🔍 **Panel Detection** - Auto (OpenCV contours) or Manual drawing
+- ✏️ **Interactive Editor** - React Canvas with drag/resize/delete/add
+- 🎬 **Video Render** - MP4 with smooth transitions
+
+### Video Settings
+- 🎯 **Social Media Presets** - Instagram Reels, TikTok, YouTube Shorts/Landscape, Twitter/X
+- 🎨 **Aspect Ratios** - 16:9, 9:16 (Vertical), 1:1 (Square)
+- ⚙️ **FPS** - 12 to 60
+- 🎵 **Audio Track** - Upload audio with auto-fit, fade in/out
+
+### Transitions
+- Ken Burns (pan & zoom)
+- Crossfade
+- Slide (4 directions)
+- Zoom
+
+### React ↔ Streamlit Sync
+- HTTP server on port 8765 for auto-sync
+- JSON copy/paste fallback
+- 🔄 Sync from Editor button
+
+## Workflow
+
+The application uses a **4-step wizard interface**:
+
+1. **📁 Upload** - Load comic file (CBZ, CBR, PDF, ZIP, RAR, images)
+2. **🔍 Panels** - Choose detection mode:
+   - Auto Detect - automatic panel detection via OpenCV
+   - Manual Draw - create panels manually
+3. **✏️ Edit** - Interactive panel editor:
+   - React Canvas editor - visual drag/drop/resize
+   - Fine-tune fields - precise X/Y/Width/Height adjustment
+   - HTTP auto-sync (port 8765) or JSON copy/paste
+4. **🎬 Render** - Configure presets, preview, generate video:
+   - Social media presets (Reels, TikTok, YouTube, Twitter)
+   - Audio track upload with auto-fit
+   - Resolution, FPS, transitions
+
 ## Quick Start
 
 ```bash
