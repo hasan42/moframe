@@ -69,15 +69,25 @@
 ---
 
 ### 5. Пресеты для соцсетей
-**Пресеты:**
-- Instagram Reels (9:16, 30 FPS, 60 sec)
-- TikTok (9:16, 30 FPS, 180 sec)
-- YouTube Shorts (9:16, 30 FPS, 60 sec)
-- YouTube Landscape (16:9, 24 FPS)
-- Twitter/X (1:1, 24 FPS)
+**Статус:** ✅ **ВЫПОЛНЕНО** — Добавлены 5 пресетов в Step 4 (Render)
 
-**Оценка:** 1-2 часа
-**Приоритет:** Высокий (полезно для ЦА)
+**Пресеты:**
+- 🎨 **Custom** — ручные настройки
+- 📱 **Instagram Reels** (9:16, 30 FPS, 60 sec max)
+- 🎵 **TikTok** (9:16, 30 FPS, 180 sec max)
+- 📺 **YouTube Shorts** (9:16, 30 FPS, 60 sec max)
+- ▶️ **YouTube Landscape** (16:9, 24 FPS)
+- 🐦 **Twitter/X** (1:1, 24 FPS)
+
+**Функционал:**
+- Селект пресета в sidebar Step 4
+- Авто-установка resolution, FPS, max duration
+- Ограничение panel duration если preset имеет max_duration
+- Авто-суффикс в имени файла (например `my_comic_instagram_reels.mp4`)
+- Показ estimated video duration
+- Поддерживаемые разрешения: 16:9 (Full HD, HD, SD), 9:16 (Vertical, Vertical HD), 1:1 (Square)
+
+**Выполнено:** 2026-04-24
 
 ---
 

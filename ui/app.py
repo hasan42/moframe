@@ -530,24 +530,81 @@ def step_4_render():
     
     st.success(f"✅ Ready to render {len(panels)} panels")
     
+    # Social presets
+    SOCIAL_PRESETS = {
+        "🎨 Custom": None,
+        "📱 Instagram Reels (9:16)": {"resolution": (1080, 1920), "fps": 30, "max_duration": 60, "label": "1080x1920 (9:16)"},
+        "🎵 TikTok (9:16)": {"resolution": (1080, 1920), "fps": 30, "max_duration": 180, "label": "1080x1920 (9:16)"},
+        "📺 YouTube Shorts (9:16)": {"resolution": (1080, 1920), "fps": 30, "max_duration": 60, "label": "1080x1920 (9:16)"},
+        "▶️ YouTube Landscape (16:9)": {"resolution": (1920, 1080), "fps": 24, "max_duration": None, "label": "1920x1080 (16:9)"},
+        "🐦 Twitter/X (1:1)": {"resolution": (1080, 1080), "fps": 24, "max_duration": None, "label": "1080x1080 (1:1)"},
+    }
+
+    # Resolution options mapping
+    RESOLUTION_OPTIONS = [
+        "1920x1080 (16:9 Full HD)",
+        "1280x720 (16:9 HD)",
+        "854x480 (16:9 SD)",
+        "1080x1920 (9:16 Vertical)",
+        "720x1280 (9:16 Vertical HD)",
+        "1080x1080 (1:1 Square)",
+    ]
+
     # Settings sidebar - MUST be first to define variables
     with st.sidebar:
         st.header("⚙️ Render Settings")
-        
+
+        # Preset selector
+        preset = st.selectbox(
+            "📋 Preset",
+            list(SOCIAL_PRESETS.keys()),
+            help="Choose a preset for social media, or Custom for manual settings"
+        )
+
+        # Apply preset defaults
+        preset_data = SOCIAL_PRESETS[preset]
+        if preset_data:
+            default_res_label = preset_data["label"]
+            # Find index in options
+            try:
+                default_res_idx = RESOLUTION_OPTIONS.index(default_res_label)
+            except ValueError:
+                default_res_idx = 0
+            default_fps = preset_data["fps"]
+            max_duration = preset_data["max_duration"]
+            st.info(f"Preset: {preset_data['resolution'][0]}×{preset_data['resolution'][1]}, {preset_data['fps']} FPS")
+        else:
+            default_res_idx = 0
+            default_fps = 24
+            max_duration = None
+
+        resolution = st.selectbox(
+            "Resolution",
+            RESOLUTION_OPTIONS,
+            index=default_res_idx
+        )
+
+        fps = st.slider("FPS", 12, 60, default_fps)
+
         transition_type = st.selectbox(
             "Transition Type",
             ["Ken Burns", "Crossfade", "Slide", "Zoom"]
         )
-        
+
         transition_duration = st.slider("Transition Duration (sec)", 0.5, 3.0, 1.0, 0.1)
-        panel_duration = st.slider("Panel Duration (sec)", 1.0, 5.0, 2.0, 0.5)
-        
-        fps = st.slider("FPS", 12, 60, 24)
-        resolution = st.selectbox(
-            "Resolution",
-            ["1920x1080 (Full HD)", "1280x720 (HD)", "854x480 (SD)"],
-            index=1
-        )
+
+        # Panel duration with max limit if preset has one
+        if max_duration:
+            # Calculate max panel duration based on preset max video length
+            num_panels = len(panels)
+            num_transitions = num_panels - 1
+            total_transition_time = num_transitions * transition_duration
+            max_panel_time = (max_duration - total_transition_time) / num_panels if num_panels > 0 else max_duration
+            max_panel_time = max(1.0, min(max_panel_time, 5.0))
+            st.caption(f"⏱️ Max video length: {max_duration}s for this preset")
+            panel_duration = st.slider("Panel Duration (sec)", 0.5, max_panel_time, min(2.0, max_panel_time), 0.5)
+        else:
+            panel_duration = st.slider("Panel Duration (sec)", 0.5, 5.0, 2.0, 0.5)
     
     # Preview section
     st.markdown("### 👁️ Preview")
@@ -556,9 +613,12 @@ def step_4_render():
     if st.button("👁️ Preview First Transition", type="secondary", use_container_width=True):
         # Parse resolution
         res_map = {
-            "1920x1080 (Full HD)": (1920, 1080),
-            "1280x720 (HD)": (1280, 720),
-            "854x480 (SD)": (854, 480)
+            "1920x1080 (16:9 Full HD)": (1920, 1080),
+            "1280x720 (16:9 HD)": (1280, 720),
+            "854x480 (16:9 SD)": (854, 480),
+            "1080x1920 (9:16 Vertical)": (1080, 1920),
+            "720x1280 (9:16 Vertical HD)": (720, 1280),
+            "1080x1080 (1:1 Square)": (1080, 1080),
         }
         
         strategy_map = {
@@ -595,18 +655,35 @@ def step_4_render():
     
     st.markdown("---")
     
+    # Calculate estimated video duration
+    num_panels = len(panels)
+    num_transitions = num_panels - 1 if num_panels > 1 else 0
+    estimated_duration = num_panels * panel_duration + num_transitions * transition_duration
+    st.caption(f"⏱️ Estimated video length: **{estimated_duration:.1f}s** ({num_panels} panels × {panel_duration}s + {num_transitions} transitions × {transition_duration}s)")
+
+    # Auto-suggest filename based on preset/resolution
+    if preset_data:
+        suffix = preset.split(" (")[0].lower().replace(" ", "_").replace("📱", "").replace("🎵", "").replace("📺", "").replace("▶️", "").replace("🐦", "").replace("🎨", "").strip("_")
+        suggested_name = f"my_comic_{suffix}.mp4"
+    else:
+        res_short = resolution.split(" ")[0].replace("x", "x")
+        suggested_name = f"my_comic_{res_short}.mp4"
+
     # Output filename
     output_filename = st.text_input(
         "Output filename",
-        value="my_comic_animation.mp4"
+        value=suggested_name
     )
     
     if st.button("🎥 Render Video", type="primary", use_container_width=True):
         # Parse resolution
         res_map = {
-            "1920x1080 (Full HD)": (1920, 1080),
-            "1280x720 (HD)": (1280, 720),
-            "854x480 (SD)": (854, 480)
+            "1920x1080 (16:9 Full HD)": (1920, 1080),
+            "1280x720 (16:9 HD)": (1280, 720),
+            "854x480 (16:9 SD)": (854, 480),
+            "1080x1920 (9:16 Vertical)": (1080, 1920),
+            "720x1280 (9:16 Vertical HD)": (720, 1280),
+            "1080x1080 (1:1 Square)": (1080, 1080),
         }
         
         strategy_map = {
