@@ -822,7 +822,17 @@ def step_4_render():
         res_short = resolution.split(" ")[0].replace("x", "x")
         suggested_name = f"my_comic_{res_short}.mp4"
 
+    # Output format
+    output_format = st.selectbox(
+        "Output Format",
+        ["MP4", "GIF", "WebM", "APNG"],
+        index=0
+    )
+    
     # Output filename
+    ext_map = {"MP4": ".mp4", "GIF": ".gif", "WebM": ".webm", "APNG": ".apng"}
+    suggested_name = suggested_name.replace('.mp4', ext_map[output_format])
+    
     output_filename = st.text_input(
         "Output filename",
         value=suggested_name

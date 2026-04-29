@@ -34,6 +34,8 @@ class VideoFormat(Enum):
     AVI = "avi"
     MOV = "mov"
     WEBM = "webm"
+    GIF = "gif"
+    APNG = "apng"
 
 
 @dataclass
