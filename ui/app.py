@@ -485,6 +485,56 @@ def step_3_edit():
                     else:
                         st.session_state.manual_panels.remove(panel)
                     st.rerun()
+                
+                # TTS: OCR text extraction
+                st.markdown("---")
+                st.markdown("**🗣️ Текст для озвучки (OCR):**")
+                
+                # Check if we have extracted text
+                if not hasattr(st.session_state, 'panel_texts'):
+                    st.session_state.panel_texts = {}
+                
+                panel_key = f"page_{page_idx}_panel_{i}"
+                
+                # Extract text via OCR if not already
+                if panel_key not in st.session_state.panel_texts:
+                    if st.button("🔍 Извлечь текст", key=f"ocr_{page_idx}_{i}"):
+                        with st.spinner("OCR..."):
+                            try:
+                                from core.ocr import OCRProcessor
+                                ocr = OCRProcessor()
+                                panel_img = panel.extract_from_original()
+                                text = ocr.extract_panel_text(panel_img)
+                                st.session_state.panel_texts[panel_key] = text
+                                st.success(f"Извлечено: '{text[:50]}...'" if len(text) > 50 else f"Извлечено: '{text}'")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"OCR ошибка: {e}")
+                else:
+                    # Show editable text
+                    text = st.session_state.panel_texts[panel_key]
+                    edited_text = st.text_area(
+                        "Редактируйте текст:",
+                        value=text,
+                        key=f"tts_text_{page_idx}_{i}",
+                        height=80
+                    )
+                    if edited_text != text:
+                        st.session_state.panel_texts[panel_key] = edited_text
+                    
+                    # Preview TTS for this panel
+                    if st.button("▶️ Прослушать", key=f"tts_preview_{page_idx}_{i}"):
+                        with st.spinner("Генерация..."):
+                            try:
+                                import asyncio
+                                from core.tts import TTSManager, TTSConfig
+                                config = TTSConfig(provider="edge", voice="ru-RU-SvetlanaNeural")
+                                manager = TTSManager(config)
+                                preview_path = str(Path(st.session_state.temp_dir) / f"tts_preview_{page_idx}_{i}.mp3")
+                                asyncio.run(manager.provider.synthesize(edited_text, preview_path))
+                                st.audio(preview_path, format="audio/mp3")
+                            except Exception as e:
+                                st.error(f"TTS ошибка: {e}")
     
     # Add new panel button (adds to editor)
     col_btn1, col_btn2 = st.columns(2)
@@ -839,24 +889,32 @@ def step_4_render():
             
             config.progress_callback = progress_callback
             
-            try:
-                # Get panel texts for TTS
-                panel_texts = None
-                if use_tts:
-                    with st.spinner("Извлечение текста для озвучки..."):
-                        try:
-                            from core.ocr import OCRProcessor
-                            ocr = OCRProcessor()
-                            panel_texts = []
-                            for panel in panels:
-                                panel_img = panel.extract_from_original()
-                                text = ocr.extract_panel_text(panel_img)
-                                panel_texts.append(text)
-                                if text:
-                                    st.caption(f"📝 Панель {len(panel_texts)}: {text[:60]}...")
-                        except Exception as e:
-                            st.warning(f"OCR не удался: {e}. Озвучка без текста.")
-                            panel_texts = None
+        # Get panel texts for TTS
+        panel_texts = None
+        if use_tts:
+            # Collect texts from session state
+            if hasattr(st.session_state, 'panel_texts') and st.session_state.panel_texts:
+                panel_texts = []
+                for i, panel in enumerate(panels):
+                    panel_key = f"page_{getattr(panel, 'page_index', 0)}_panel_{i}"
+                    text = st.session_state.panel_texts.get(panel_key, "")
+                    panel_texts.append(text)
+            else:
+                # Fallback: extract on the fly
+                with st.spinner("Извлечение текста для озвучки..."):
+                    try:
+                        from core.ocr import OCRProcessor
+                        ocr = OCRProcessor()
+                        panel_texts = []
+                        for panel in panels:
+                            panel_img = panel.extract_from_original()
+                            text = ocr.extract_panel_text(panel_img)
+                            panel_texts.append(text)
+                            if text:
+                                st.caption(f"📝 Панель {len(panel_texts)}: {text[:60]}...")
+                    except Exception as e:
+                        st.warning(f"OCR не удался: {e}. Озвучка без текста.")
+                        panel_texts = None
                 
                 result_path = renderer.render(panels, panel_texts=panel_texts)
                 progress_placeholder.progress(1.0, text="Done!")
