@@ -209,15 +209,27 @@ class Morpher:
         return frames
     
     def _apply_zoom(self, img: np.ndarray, zoom: float) -> np.ndarray:
-        """Apply zoom to image, keeping centered."""
+        """Apply zoom to image, keeping centered.
+        
+        Args:
+            img: Input image
+            zoom: Zoom factor (>1 = zoom in, <1 = zoom out, 1 = no change)
+        """
         if zoom == 1.0:
             return img.copy()
         
         h, w = img.shape[:2]
         
+        # Clamp zoom to prevent negative/invalid sizes
+        zoom = max(0.1, zoom)  # Minimum 10% to prevent division by zero
+        
         # Calculate scaled size
         new_w = int(w * zoom)
         new_h = int(h * zoom)
+        
+        # Ensure minimum size
+        new_w = max(1, new_w)
+        new_h = max(1, new_h)
         
         # Resize
         scaled = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
