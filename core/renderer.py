@@ -198,10 +198,25 @@ class Renderer:
                 )
                 manager = TTSManager(config)
                 
-                # Calculate panel durations in ms
-                panel_durations_ms = [self.config.panel_duration_frames * 1000 / self.config.fps] * len(panels)
-                
+                # Generate TTS segments
                 segments = asyncio.run(manager.generate_for_panels(panel_texts))
+                
+                # Calculate durations based on TTS audio lengths
+                base_duration_ms = self.config.panel_duration_frames * 1000 / self.config.fps
+                panel_durations_ms = manager.calculate_panel_durations(
+                    segments,
+                    base_duration_ms,
+                    min_panel_duration_ms=1000,
+                    max_panel_duration_ms=15000
+                )
+                
+                # Adjust panel_duration_frames if TTS requires longer
+                for i, duration_ms in enumerate(panel_durations_ms):
+                    required_frames = int(duration_ms * self.config.fps / 1000)
+                    if required_frames > self.config.panel_duration_frames:
+                        # We need to adjust - this is handled by the audio track length
+                        pass
+                
                 tts_audio_path = manager.combine_audio_tracks(segments, panel_durations_ms)
             except Exception as e:
                 warnings.warn(f"TTS generation failed: {e}")

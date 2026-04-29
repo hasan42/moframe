@@ -294,7 +294,38 @@ class TTSManager:
                 pass
 
 
-# Convenience functions for sync usage
+    def calculate_panel_durations(
+        self,
+        segments: List[TTSSegment],
+        base_panel_duration_ms: int,
+        min_panel_duration_ms: int = 1000,
+        max_panel_duration_ms: int = 10000
+    ) -> List[int]:
+        """
+        Calculate optimal panel durations based on TTS audio lengths.
+        
+        Args:
+            segments: List of TTSSegment with duration_ms
+            base_panel_duration_ms: Base duration per panel
+            min_panel_duration_ms: Minimum panel duration
+            max_panel_duration_ms: Maximum panel duration
+            
+        Returns:
+            List of panel durations in milliseconds
+        """
+        durations = []
+        
+        for segment in segments:
+            # Panel must be at least as long as its audio
+            audio_duration = segment.duration_ms or 0
+            duration = max(base_panel_duration_ms, audio_duration)
+            
+            # Clamp to min/max
+            duration = max(min_panel_duration_ms, min(duration, max_panel_duration_ms))
+            
+            durations.append(int(duration))
+        
+        return durations
 def generate_tts_for_panels(
     panels_text: List[str],
     provider: str = "edge",
