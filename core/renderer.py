@@ -16,8 +16,9 @@ import cv2
 from tqdm import tqdm
 
 try:
-    from moviepy.editor import ImageSequenceClip, AudioFileClip, CompositeAudioClip
-    from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
+    from moviepy import ImageSequenceClip, AudioFileClip
+    from moviepy.audio.AudioClip import CompositeAudioClip
+    from moviepy.audio.fx import MultiplyVolume, AudioFadeIn, AudioFadeOut
     MOVIEPY_AVAILABLE = True
 except ImportError:
     MOVIEPY_AVAILABLE = False
@@ -281,14 +282,10 @@ class Renderer:
         return result
     
     def _export_with_moviepy(self, frames: List[np.ndarray], output_path: Path):
-        """Export frames to video using moviepy."""
-        # Convert frames to list of PIL Images
-        from PIL import Image
-        
-        pil_frames = [Image.fromarray(frame) for frame in frames]
-        
-        # Create video clip
-        clip = ImageSequenceClip(pil_frames, fps=self.config.fps)
+        """Export frames to video using moviepy 2.x."""
+        # moviepy 2.x expects numpy arrays directly (not PIL Images)
+        # Create video clip from numpy arrays
+        clip = ImageSequenceClip(frames, fps=self.config.fps)
         
         # Add audio if specified
         if self.config.audio_path and Path(self.config.audio_path).exists():
@@ -302,22 +299,26 @@ class Renderer:
                     audio = CompositeAudioClip([audio] * n_loops)
                 
                 # Trim to video length
-                audio = audio.subclip(0, video_duration)
+                audio = audio.subclipped(0, video_duration)
                 
-                # Apply volume and fades
-                audio = audio.volumex(self.config.audio_volume)
-                audio = audio.audio_fadein(self.config.audio_fade_in)
-                audio = audio.audio_fadeout(self.config.audio_fade_out)
+                # Apply volume and fades using moviepy 2.x effects
+                effects = []
+                if self.config.audio_volume != 1.0:
+                    effects.append(MultiplyVolume(self.config.audio_volume))
+                if self.config.audio_fade_in > 0:
+                    effects.append(AudioFadeIn(self.config.audio_fade_in))
+                if self.config.audio_fade_out > 0:
+                    effects.append(AudioFadeOut(self.config.audio_fade_out))
+                if effects:
+                    audio = audio.with_effects(effects)
                 
-                clip = clip.set_audio(audio)
+                clip = clip.with_audio(audio)
             except Exception as e:
                 warnings.warn(f"Could not add audio: {e}")
         
         # Write video
         clip.write_videofile(
             str(output_path),
-            codec=self.config.codec,
-            bitrate=self.config.bitrate,
             fps=self.config.fps,
             threads=4,
             logger=None  # Suppress moviepy output

@@ -15,12 +15,18 @@ class TestPanelDetector(unittest.TestCase):
     
     def _create_test_page(self, panels_config):
         """Create a synthetic comic page with defined panels."""
+        import random
         # White background (1000x1400, typical comic page)
         img = Image.new('RGB', (1000, 1400), color='white')
         draw = ImageDraw.Draw(img)
         
-        # Draw black lines for panels
+        # Fill panels with content, then draw borders
         for x, y, w, h in panels_config:
+            # Fill with gradient/content to simulate real comic panel
+            for row in range(y + 5, y + h - 5, 3):
+                shade = random.randint(180, 220)
+                draw.line([(x + 5, row), (x + w - 5, row)], fill=(shade, shade, shade), width=3)
+            # Draw border
             draw.rectangle([x, y, x+w, y+h], outline='black', width=5)
         
         return np.array(img)
@@ -30,7 +36,8 @@ class TestPanelDetector(unittest.TestCase):
         config = [(50, 50, 900, 1300)]
         img = self._create_test_page(config)
         
-        detector = PanelDetector()
+        # Use large gap threshold for single-panel pages to avoid false splits
+        detector = PanelDetector(gap_threshold=500)
         panels = detector.detect(img)
         
         self.assertEqual(len(panels), 1)

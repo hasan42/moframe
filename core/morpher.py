@@ -216,20 +216,24 @@ class Morpher:
         h, w = img.shape[:2]
         
         # Calculate scaled size
-        new_w = int(w / zoom)
-        new_h = int(h / zoom)
+        new_w = int(w * zoom)
+        new_h = int(h * zoom)
         
-        # Resize down
+        # Resize
         scaled = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LANCZOS4)
         
-        # Create full-size canvas and center the scaled image
-        result = np.zeros_like(img)
-        y_offset = (h - new_h) // 2
-        x_offset = (w - new_w) // 2
-        
-        result[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = scaled
-        
-        return result
+        if zoom > 1.0:
+            # Zoom in: crop from center of resized image to original size
+            y_offset = (new_h - h) // 2
+            x_offset = (new_w - w) // 2
+            return scaled[y_offset:y_offset + h, x_offset:x_offset + w]
+        else:
+            # Zoom out: center scaled image on full-size canvas
+            result = np.zeros_like(img)
+            y_offset = (h - new_h) // 2
+            x_offset = (w - new_w) // 2
+            result[y_offset:y_offset + new_h, x_offset:x_offset + new_w] = scaled
+            return result
     
     def _slide(
         self,

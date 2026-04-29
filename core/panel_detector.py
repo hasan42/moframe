@@ -158,19 +158,19 @@ class PanelDetector:
             
             content = edges[y_min:y_max, x_min:x_max]
             
-            # Find vertical gaps in edges
+            # Find vertical gaps in edges - use absolute threshold
             v_proj = np.sum(content, axis=0)
-            v_norm = v_proj / (np.max(v_proj) + 1e-6)
-            v_gaps = np.where(v_norm < 0.1)[0]
+            v_threshold = min(1000, np.max(v_proj) * 0.2)  # adaptive but bounded
+            v_gaps = np.where(v_proj < v_threshold)[0]
             
             # Find horizontal gaps
             h_proj = np.sum(content, axis=1)
-            h_norm = h_proj / (np.max(h_proj) + 1e-6)
-            h_gaps = np.where(h_norm < 0.1)[0]
+            h_threshold = min(1000, np.max(h_proj) * 0.2)
+            h_gaps = np.where(h_proj < h_threshold)[0]
             
             # Add gap positions
-            v_gap_positions = [x_min + g for g in self._cluster_gaps(v_gaps, 10)]
-            h_gap_positions = [y_min + g for g in self._cluster_gaps(h_gaps, 15)]
+            v_gap_positions = [x_min + g for g in self._cluster_gaps(v_gaps, self.gap_threshold)]
+            h_gap_positions = [y_min + g for g in self._cluster_gaps(h_gaps, self.gap_threshold)]
         else:
             v_gap_positions = []
             h_gap_positions = []
