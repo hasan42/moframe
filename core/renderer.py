@@ -407,7 +407,21 @@ class Renderer:
         
         # Write video
         try:
+            # Determine output directory and ensure it's writable
+            output_dir = output_path.parent
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Use a dedicated temp directory for moviepy temp files
+            import tempfile
+            mp_temp_dir = Path(tempfile.gettempdir()) / 'moframe_moviepy'
+            mp_temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Set moviepy temp directory via environment
+            old_tempdir = os.environ.get('TMPDIR')
+            os.environ['TMPDIR'] = str(mp_temp_dir)
+            
             print(f"DEBUG: Writing video to {output_path}")
+            print(f"DEBUG: MoviePy temp dir: {mp_temp_dir}")
             print(f"DEBUG: TTS audio: {tts_audio_path}")
             print(f"DEBUG: BG audio: {self.config.audio_path}")
             print(f"DEBUG: Frames: {len(frames)}, FPS: {self.config.fps}")
@@ -432,6 +446,13 @@ class Renderer:
                     codec="libx264"
                 )
             print(f"DEBUG: Video written successfully")
+            
+            # Restore TMPDIR
+            if old_tempdir:
+                os.environ['TMPDIR'] = old_tempdir
+            else:
+                os.environ.pop('TMPDIR', None)
+                
         except Exception as e:
             warnings.warn(f"MoviePy write failed: {e}. Trying OpenCV fallback.")
             self._export_with_opencv(frames, output_path)
@@ -440,25 +461,40 @@ class Renderer:
     
     def _export_with_opencv(self, frames: List[np.ndarray], output_path: Path):
         """Export frames to video using OpenCV (fallback)."""
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # Determine codec from extension
+        ext = output_path.suffix.lower()
+        if ext == '.avi':
+            fourcc = cv2.VideoWriter_fourcc(*'XVID')
+        elif ext == '.webm':
+            fourcc = cv2.VideoWriter_fourcc(*'VP80')
+        else:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        
+        # Create a temp file first, then rename (atomic write)
+        temp_path = output_path.with_suffix('.tmp.mp4')
         
         writer = cv2.VideoWriter(
-            str(output_path),
+            str(temp_path),
             fourcc,
             self.config.fps,
             self.config.resolution
         )
         
         if not writer.isOpened():
-            raise RuntimeError(f"Failed to open video writer for {output_path}")
+            raise RuntimeError(f"Failed to open video writer for {temp_path}")
         
         try:
             for frame in frames:
                 # Convert RGB to BGR for OpenCV
+                if frame.shape[:2] != self.config.resolution[::-1]:
+                    frame = cv2.resize(frame, self.config.resolution, interpolation=cv2.INTER_LANCZOS4)
                 bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
                 writer.write(bgr_frame)
         finally:
             writer.release()
+        
+        # Atomic rename
+        temp_path.rename(output_path)
     
     def preview_transition(
         self,
