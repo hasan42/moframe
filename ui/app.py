@@ -915,16 +915,17 @@ def step_4_render():
                     except Exception as e:
                         st.warning(f"OCR не удался: {e}. Озвучка без текста.")
                         panel_texts = None
-                
-                result_path = renderer.render(panels, panel_texts=panel_texts)
-                progress_placeholder.progress(1.0, text="Done!")
-                
-                if result_path and Path(result_path).exists():
-                    st.session_state.rendered_video_path = result_path
-                    st.success(f"✅ Video saved: {output_filename}")
-                
-            except Exception as e:
-                st.error(f"Rendering failed: {e}")
+        
+        try:
+            result_path = renderer.render(panels, panel_texts=panel_texts)
+            progress_placeholder.progress(1.0, text="Done!")
+            
+            if result_path and Path(result_path).exists():
+                st.session_state.rendered_video_path = result_path
+                st.success(f"✅ Video saved: {output_filename}")
+        
+        except Exception as e:
+            st.error(f"Rendering failed: {e}")
     
     # Show rendered video if available
     if st.session_state.rendered_video_path and Path(st.session_state.rendered_video_path).exists():
