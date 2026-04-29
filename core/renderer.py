@@ -59,6 +59,12 @@ class RenderConfig:
     audio_fade_out: float = 0.5
     audio_volume: float = 1.0
     
+    # TTS settings (optional)
+    tts_enabled: bool = False
+    tts_provider: str = "edge"
+    tts_voice: str = "ru-RU-SvetlanaNeural"
+    tts_language: str = "ru"
+    
     # Progress callback
     progress_callback: Optional[Callable[[float, str], None]] = None
     
@@ -92,7 +98,8 @@ class Renderer:
         panels: List[Panel],
         output_path: Optional[str] = None,
         save_frames: bool = False,
-        temp_dir: Optional[str] = None
+        temp_dir: Optional[str] = None,
+        panel_texts: Optional[List[str]] = None
     ) -> str:
         """
         Render panels to video.
@@ -178,9 +185,30 @@ class Renderer:
         if self.config.progress_callback:
             self.config.progress_callback(0.95, "Encoding video...")
         
+        # Generate TTS audio if enabled
+        tts_audio_path = None
+        if self.config.tts_enabled and panel_texts:
+            try:
+                import asyncio
+                from core.tts import TTSManager, TTSConfig
+                config = TTSConfig(
+                    provider=self.config.tts_provider,
+                    voice=self.config.tts_voice,
+                    language=self.config.tts_language
+                )
+                manager = TTSManager(config)
+                
+                # Calculate panel durations in ms
+                panel_durations_ms = [self.config.panel_duration_frames * 1000 / self.config.fps] * len(panels)
+                
+                segments = asyncio.run(manager.generate_for_panels(panel_texts))
+                tts_audio_path = manager.combine_audio_tracks(segments, panel_durations_ms)
+            except Exception as e:
+                warnings.warn(f"TTS generation failed: {e}")
+        
         # Export to video
         if MOVIEPY_AVAILABLE:
-            self._export_with_moviepy(all_frames, output_path)
+            self._export_with_moviepy(all_frames, output_path, tts_audio_path)
         else:
             self._export_with_opencv(all_frames, output_path)
         
@@ -281,14 +309,53 @@ class Renderer:
         
         return result
     
-    def _export_with_moviepy(self, frames: List[np.ndarray], output_path: Path):
+    def _export_with_moviepy(self, frames: List[np.ndarray], output_path: Path, tts_audio_path: Optional[str] = None):
         """Export frames to video using moviepy 2.x."""
         # moviepy 2.x expects numpy arrays directly (not PIL Images)
         # Create video clip from numpy arrays
         clip = ImageSequenceClip(frames, fps=self.config.fps)
         
-        # Add audio if specified
-        if self.config.audio_path and Path(self.config.audio_path).exists():
+        # Add TTS audio if enabled
+        if tts_audio_path and Path(tts_audio_path).exists():
+            try:
+                tts_audio = AudioFileClip(tts_audio_path)
+                video_duration = len(frames) / self.config.fps
+                
+                # Trim or loop TTS to match video
+                if tts_audio.duration < video_duration:
+                    n_loops = int(np.ceil(video_duration / tts_audio.duration))
+                    tts_audio = CompositeAudioClip([tts_audio] * n_loops)
+                tts_audio = tts_audio.subclipped(0, video_duration)
+                
+                # If background audio also exists, mix them
+                if self.config.audio_path and Path(self.config.audio_path).exists():
+                    bg_audio = AudioFileClip(self.config.audio_path)
+                    if bg_audio.duration < video_duration:
+                        n_loops = int(np.ceil(video_duration / bg_audio.duration))
+                        bg_audio = CompositeAudioClip([bg_audio] * n_loops)
+                    bg_audio = bg_audio.subclipped(0, video_duration)
+                    
+                    effects = []
+                    if self.config.audio_volume != 1.0:
+                        effects.append(MultiplyVolume(self.config.audio_volume))
+                    if self.config.audio_fade_in > 0:
+                        effects.append(AudioFadeIn(self.config.audio_fade_in))
+                    if self.config.audio_fade_out > 0:
+                        effects.append(AudioFadeOut(self.config.audio_fade_out))
+                    if effects:
+                        bg_audio = bg_audio.with_effects(effects)
+                    
+                    # Mix TTS + background
+                    from moviepy.audio.AudioClip import CompositeAudioClip
+                    final_audio = CompositeAudioClip([bg_audio, tts_audio])
+                    clip = clip.with_audio(final_audio)
+                else:
+                    clip = clip.with_audio(tts_audio)
+            except Exception as e:
+                warnings.warn(f"Could not add TTS audio: {e}")
+        
+        # Add background audio if specified (and no TTS)
+        elif self.config.audio_path and Path(self.config.audio_path).exists():
             try:
                 audio = AudioFileClip(self.config.audio_path)
                 

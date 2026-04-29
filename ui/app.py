@@ -661,6 +661,49 @@ def step_4_render():
             audio_fade_in = 0.5
             audio_fade_out = 0.5
             audio_volume = 1.0
+        
+        # TTS Section
+        st.markdown("---")
+        st.subheader("🗣️ Озвучка текста (TTS)")
+        
+        use_tts = st.checkbox(
+            "🔊 Включить озвучку текста",
+            value=False,
+            help="Автоматически извлекать и озвучивать текст из панелей"
+        )
+        
+        tts_provider = "edge"
+        tts_voice = "ru-RU-SvetlanaNeural"
+        tts_language = "ru"
+        
+        if use_tts:
+            col_tts1, col_tts2 = st.columns(2)
+            with col_tts1:
+                tts_provider = st.selectbox(
+                    "Провайдер",
+                    ["edge", "say"],
+                    help="edge = высокое качество, say = macOS built-in"
+                )
+            with col_tts2:
+                tts_voice = st.selectbox(
+                    "Голос",
+                    ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural", "en-US-JennyNeural", "en-US-GuyNeural"],
+                    index=0
+                )
+            
+            # Preview TTS
+            if st.button("▶️ Предпрослушать голос", type="secondary"):
+                with st.spinner("Генерация образца..."):
+                    try:
+                        import asyncio
+                        from core.tts import TTSManager, TTSConfig
+                        config = TTSConfig(provider=tts_provider, voice=tts_voice)
+                        manager = TTSManager(config)
+                        sample_path = str(Path(st.session_state.temp_dir) / "tts_sample.mp3")
+                        asyncio.run(manager.provider.synthesize("Привет! Это тест голоса.", sample_path))
+                        st.audio(sample_path, format="audio/mp3")
+                    except Exception as e:
+                        st.error(f"Ошибка TTS: {e}")
     
     # Preview section
     st.markdown("### 👁️ Preview")
@@ -779,6 +822,10 @@ def step_4_render():
             audio_fade_in=audio_fade_in,
             audio_fade_out=audio_fade_out,
             audio_volume=audio_volume,
+            tts_enabled=use_tts,
+            tts_provider=tts_provider,
+            tts_voice=tts_voice,
+            tts_language=tts_language,
             output_path=str(Path(st.session_state.temp_dir) / output_filename)
         )
         
@@ -793,7 +840,25 @@ def step_4_render():
             config.progress_callback = progress_callback
             
             try:
-                result_path = renderer.render(panels)
+                # Get panel texts for TTS
+                panel_texts = None
+                if use_tts:
+                    with st.spinner("Извлечение текста для озвучки..."):
+                        try:
+                            from core.ocr import OCRProcessor
+                            ocr = OCRProcessor()
+                            panel_texts = []
+                            for panel in panels:
+                                panel_img = panel.extract_from_original()
+                                text = ocr.extract_panel_text(panel_img)
+                                panel_texts.append(text)
+                                if text:
+                                    st.caption(f"📝 Панель {len(panel_texts)}: {text[:60]}...")
+                        except Exception as e:
+                            st.warning(f"OCR не удался: {e}. Озвучка без текста.")
+                            panel_texts = None
+                
+                result_path = renderer.render(panels, panel_texts=panel_texts)
                 progress_placeholder.progress(1.0, text="Done!")
                 
                 if result_path and Path(result_path).exists():
