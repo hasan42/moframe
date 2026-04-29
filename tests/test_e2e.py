@@ -2,7 +2,11 @@
 E2E тесты для MoFrame Streamlit UI.
 
 Использует Playwright для автоматизации браузера.
-Проверяет базовую загрузку страницы.
+Проверяет базовую загрузку страницы и наличие элементов.
+
+Примечание: Полноценный workflow (загрузка → рендер) сложно тестировать
+через Playwright из-за динамической природы Streamlit. Для этого
+используются unit тесты и ручное тестирование.
 """
 
 import pytest
@@ -109,14 +113,27 @@ def test_file_uploader_exists(page: Page):
     expect(page.locator("[data-testid='stFileUploader']")).to_be_visible()
 
 
-def test_render_button_exists(page: Page):
-    """Test that render step has the expected elements."""
+def test_render_section_exists(page: Page):
+    """Test that render section has expected elements."""
     page.goto("http://localhost:8501")
     
     page.wait_for_selector("text=🎬 Render", timeout=10000)
     
     # Check that render step text exists
     expect(page.locator("text=🎬 Render")).to_be_visible()
+
+
+def test_all_steps_visible(page: Page):
+    """Test that all workflow steps are visible."""
+    page.goto("http://localhost:8501")
+    
+    # Wait for page load
+    page.wait_for_selector("text=MoFrame", timeout=10000)
+    
+    # Check all steps
+    steps = ["📁 Upload", "🔍 Panels", "✏️ Edit", "🎬 Render"]
+    for step in steps:
+        expect(page.locator(f"text={step}")).to_be_visible()
 
 
 if __name__ == "__main__":
