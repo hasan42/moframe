@@ -933,6 +933,8 @@ def step_4_render():
         
         except Exception as e:
             st.error(f"Rendering failed: {e}")
+            import traceback
+            st.code(traceback.format_exc())
     
     # Show rendered video if available
     if st.session_state.rendered_video_path and Path(st.session_state.rendered_video_path).exists():

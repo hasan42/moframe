@@ -344,8 +344,9 @@ class Renderer:
                 # Trim or loop TTS to match video
                 if tts_audio.duration < video_duration:
                     n_loops = int(np.ceil(video_duration / tts_audio.duration))
-                    tts_audio = CompositeAudioClip([tts_audio] * n_loops)
-                tts_audio = tts_audio.subclipped(0, video_duration)
+                    if n_loops > 1:
+                        tts_audio = CompositeAudioClip([tts_audio] * n_loops)
+                tts_audio = tts_audio.subclipped(0, min(video_duration, tts_audio.duration))
                 
                 # If background audio also exists, mix them
                 if self.config.audio_path and Path(self.config.audio_path).exists():
@@ -366,7 +367,6 @@ class Renderer:
                         bg_audio = bg_audio.with_effects(effects)
                     
                     # Mix TTS + background
-                    from moviepy.audio.AudioClip import CompositeAudioClip
                     final_audio = CompositeAudioClip([bg_audio, tts_audio])
                     clip = clip.with_audio(final_audio)
                 else:
@@ -405,14 +405,31 @@ class Renderer:
         
         # Write video
         try:
-            clip.write_videofile(
-                str(output_path),
-                fps=self.config.fps,
-                threads=4,
-                logger=None,  # Suppress moviepy output
-                temp_audiofile=str(output_path.parent / f"temp_audio_{output_path.stem}.mp3"),
-                remove_temp=True
-            )
+            print(f"DEBUG: Writing video to {output_path}")
+            print(f"DEBUG: TTS audio: {tts_audio_path}")
+            print(f"DEBUG: BG audio: {self.config.audio_path}")
+            print(f"DEBUG: Frames: {len(frames)}, FPS: {self.config.fps}")
+            
+            # If we have audio, use it without temp file
+            if clip.audio is not None:
+                clip.write_videofile(
+                    str(output_path),
+                    fps=self.config.fps,
+                    threads=4,
+                    logger=None,
+                    codec="libx264",
+                    audio_codec="aac",
+                    audio=True
+                )
+            else:
+                clip.write_videofile(
+                    str(output_path),
+                    fps=self.config.fps,
+                    threads=4,
+                    logger=None,
+                    codec="libx264"
+                )
+            print(f"DEBUG: Video written successfully")
         except Exception as e:
             warnings.warn(f"MoviePy write failed: {e}. Trying OpenCV fallback.")
             self._export_with_opencv(frames, output_path)
