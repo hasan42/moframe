@@ -9,6 +9,22 @@ from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import numpy as np
 from PIL import Image
+import os
+import tempfile
+import subprocess
+
+# Configure tesseract path for macOS
+import pytesseract
+import shutil
+
+# Auto-detect tesseract path
+_tesseract_path = shutil.which('tesseract')
+# On macOS with Homebrew, use the full path
+if not _tesseract_path and os.path.exists('/opt/homebrew/bin/tesseract'):
+    _tesseract_path = '/opt/homebrew/bin/tesseract'
+
+if _tesseract_path:
+    pytesseract.pytesseract.tesseract_cmd = _tesseract_path
 
 
 @dataclass
@@ -23,14 +39,13 @@ class TextBlock:
 class OCRProcessor:
     """OCR processor for comic panels."""
     
-    def __init__(self, lang: str = "rus+eng"):
+    def __init__(self, lang: str = "eng"):
         self.lang = lang
         self._check_tesseract()
     
     def _check_tesseract(self):
         """Check if tesseract is available."""
         try:
-            import pytesseract
             pytesseract.get_tesseract_version()
         except Exception as e:
             print(f"⚠️ Tesseract not available: {e}")
@@ -47,44 +62,51 @@ class OCRProcessor:
         Returns:
             List of TextBlock objects
         """
-        import pytesseract
-        
         # Convert to PIL if needed
         if isinstance(image, np.ndarray):
             image = Image.fromarray(image)
         
-        # Get detailed data
-        data = pytesseract.image_to_data(
-            image,
-            lang=self.lang,
-            output_type=pytesseract.Output.DICT
-        )
+        # Ensure RGB mode
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
         
-        blocks = []
-        n_boxes = len(data['text'])
-        
-        for i in range(n_boxes):
-            text = data['text'][i].strip()
+        # Save to temp file for tesseract CLI
+        # Use current directory for temp file (tesseract has issues with /tmp on macOS)
+        tmp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_ocr_temp.png')
+        try:
+            image.save(tmp_path)
+            
+            # Run tesseract directly via subprocess (avoids pytesseract encoding bugs)
+            result = subprocess.run(
+                [pytesseract.pytesseract.tesseract_cmd, tmp_path, 'stdout', '-l', self.lang, '--psm', '6'],
+                capture_output=True
+            )
+            
+            # Decode with error handling
+            raw_text = result.stdout.decode('utf-8', errors='replace').strip()
+            
+            if not raw_text:
+                return []
+            
+            # Create single text block from full text
+            lines = [line.strip() for line in raw_text.split('\n') if line.strip()]
+            text = ' '.join(lines)
+            
             if not text:
-                continue
+                return []
             
-            conf = int(data['conf'][i])
-            if conf < 30:  # Skip low confidence
-                continue
-            
-            x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
-            
-            # Classify block type
             block_type = self._classify_text(text)
             
-            blocks.append(TextBlock(
+            return [TextBlock(
                 text=text,
-                bbox=(x, y, w, h),
-                confidence=conf / 100.0,
+                bbox=(0, 0, image.width, image.height),
+                confidence=0.7,  # Default since we don't have per-word confidence
                 block_type=block_type
-            ))
-        
-        return blocks
+            )]
+            
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                os.remove(tmp_path)
     
     def _classify_text(self, text: str) -> str:
         """
