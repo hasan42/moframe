@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  moframe:
+    build: .
+    container_name: moframe
+    ports:
+      - "8501:8501"
+    volumes:
+      # Монтирование папок для данных
+      - ./data/input:/app/data/input
+      - ./data/output:/app/data/output
+      - ./temp:/app/temp
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+      - STREAMLIT_SERVER_PORT=8501
+      - STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    restart: unless-stopped
+
+  # Опционально: Jupyter для разработки
+  jupyter:
+    build: .
+    container_name: moframe-jupyter
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
+    command: >
+      sh -c "pip install jupyter &&
+c      jupyter notebook --ip=0.0.0.0 --port=8888 --no-browser --allow-root"
+    profiles:
+      - dev
