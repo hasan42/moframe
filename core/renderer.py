@@ -65,6 +65,11 @@ class RenderConfig:
     tts_voice: str = "ru-RU-SvetlanaNeural"
     tts_language: str = "ru"
     
+    # AI Morphing settings (optional)
+    ai_morph_enabled: bool = False
+    ai_morph_strategy: str = "optical_flow"  # "optical_flow", "depth_aware", "hybrid"
+    ai_morph_flow_method: str = "farneback"  # "farneback", "deepflow", "dis"
+    
     # Progress callback
     progress_callback: Optional[Callable[[float, str], None]] = None
     

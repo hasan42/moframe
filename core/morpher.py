@@ -18,6 +18,9 @@ class MorphStrategy(Enum):
     FEATURE_MORPH = "feature_morph"     # Feature-based warping (for similar images)
     SLIDE = "slide"                     # Slide transition
     ZOOM = "zoom"                       # Zoom in/out
+    AI_OPTICAL_FLOW = "ai_optical_flow"  # AI: Optical flow
+    AI_DEPTH_AWARE = "ai_depth_aware"    # AI: Depth-aware parallax
+    AI_HYBRID = "ai_hybrid"              # AI: Hybrid approach
 
 
 @dataclass
@@ -80,6 +83,31 @@ class Morpher:
         # Preprocess images to target size
         img1_resized = self._letterbox(img1)
         img2_resized = self._letterbox(img2)
+        
+        # Check for AI morphing strategies
+        if config.strategy in (MorphStrategy.AI_OPTICAL_FLOW, MorphStrategy.AI_DEPTH_AWARE, MorphStrategy.AI_HYBRID):
+            try:
+                from .ai_morpher import AIMorpher, AIMorphConfig, AIMorphStrategy
+                
+                ai_morpher = AIMorpher(target_size=self.target_size)
+                
+                strategy_map = {
+                    MorphStrategy.AI_OPTICAL_FLOW: AIMorphStrategy.OPTICAL_FLOW,
+                    MorphStrategy.AI_DEPTH_AWARE: AIMorphStrategy.DEPTH_AWARE,
+                    MorphStrategy.AI_HYBRID: AIMorphStrategy.HYBRID,
+                }
+                
+                ai_config = AIMorphConfig(
+                    strategy=strategy_map[config.strategy],
+                    duration_frames=config.duration_frames,
+                    easing=config.easing,
+                    flow_method='farneback'
+                )
+                
+                return ai_morpher.morph(img1_resized, img2_resized, ai_config)
+            except Exception as e:
+                warnings.warn(f"AI morphing failed: {e}. Falling back to crossfade.")
+                return self._crossfade(img1_resized, img2_resized, config)
         
         if config.strategy == MorphStrategy.CROSSFADE:
             return self._crossfade(img1_resized, img2_resized, config)
