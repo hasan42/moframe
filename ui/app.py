@@ -640,7 +640,7 @@ def step_4_render():
 
         transition_type = st.selectbox(
             "Transition Type",
-            ["Ken Burns", "Crossfade", "Slide", "Zoom"]
+            ["Ken Burns", "Crossfade", "Slide", "Zoom", "AI Optical Flow", "AI Depth Aware", "AI Hybrid"]
         )
 
         transition_duration = st.slider("Transition Duration (sec)", 0.5, 3.0, 1.0, 0.1)
@@ -839,7 +839,10 @@ def step_4_render():
             "Ken Burns": MorphStrategy.KEN_BURNS,
             "Crossfade": MorphStrategy.CROSSFADE,
             "Slide": MorphStrategy.SLIDE,
-            "Zoom": MorphStrategy.ZOOM
+            "Zoom": MorphStrategy.ZOOM,
+            "AI Optical Flow": MorphStrategy.AI_OPTICAL_FLOW,
+            "AI Depth Aware": MorphStrategy.AI_DEPTH_AWARE,
+            "AI Hybrid": MorphStrategy.AI_HYBRID,
         }
         
         # Handle auto-fit to audio duration

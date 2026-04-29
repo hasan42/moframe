@@ -71,9 +71,11 @@ class OCRProcessor:
             image = image.convert('RGB')
         
         # Save to temp file for tesseract CLI
-        # Use current directory for temp file (tesseract has issues with /tmp on macOS)
-        tmp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_ocr_temp.png')
+        # Use a temp file in a writable directory
+        import tempfile
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix='.png')
         try:
+            os.close(tmp_fd)
             image.save(tmp_path)
             
             # Run tesseract directly via subprocess (avoids pytesseract encoding bugs)
