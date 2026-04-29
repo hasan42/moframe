@@ -171,7 +171,11 @@ def init_session_state():
     
     # Common settings
     if 'temp_dir' not in st.session_state:
-        st.session_state.temp_dir = tempfile.mkdtemp()
+        st.session_state.temp_dir = tempfile.mkdtemp(prefix='moframe_')
+        # Ensure temp dir is writable
+        test_file = Path(st.session_state.temp_dir) / '.test_write'
+        test_file.write_text('test')
+        test_file.unlink()
     if 'reading_order' not in st.session_state:
         st.session_state.reading_order = "Left to Right"
 

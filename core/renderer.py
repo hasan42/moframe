@@ -404,12 +404,18 @@ class Renderer:
                 warnings.warn(f"Could not add audio: {e}")
         
         # Write video
-        clip.write_videofile(
-            str(output_path),
-            fps=self.config.fps,
-            threads=4,
-            logger=None  # Suppress moviepy output
-        )
+        try:
+            clip.write_videofile(
+                str(output_path),
+                fps=self.config.fps,
+                threads=4,
+                logger=None,  # Suppress moviepy output
+                temp_audiofile=str(output_path.parent / f"temp_audio_{output_path.stem}.mp3"),
+                remove_temp=True
+            )
+        except Exception as e:
+            warnings.warn(f"MoviePy write failed: {e}. Trying OpenCV fallback.")
+            self._export_with_opencv(frames, output_path)
         
         clip.close()
     
